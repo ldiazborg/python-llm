@@ -1,16 +1,13 @@
+"""Shared fixtures: a simulated LLM, a fake query runner and an API test client."""
+
 from collections.abc import Iterator
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from orders_nl.api.main import app, get_query_runner, get_sql_generator
 from orders_nl.config import Settings, get_settings
-from orders_nl.llm import LLMError
-
-# Marker for tests whose target is still a stub. strict=True: once the stub is
-# implemented the test XPASSes -> fails, reminding you to remove the marker.
-todo = pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="stub not implemented")
+from orders_nl.db import QueryResult
 
 
 class FakeSQLGenerator:
@@ -19,24 +16,29 @@ class FakeSQLGenerator:
     def __init__(self, sql: str | None = None, error: Exception | None = None) -> None:
         self.sql = sql
         self.error = error
-        self.questions: list[str] = []
+        self.questions: list[str] = []  # what the API asked, for assertions
 
     def generate_sql(self, question: str) -> str:
         self.questions.append(question)
         if self.error is not None:
             raise self.error
-        assert self.sql is not None
+        assert self.sql is not None, "set fake_llm.sql or fake_llm.error in the test"
         return self.sql
 
 
 class FakeQueryRunner:
-    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
-        self.rows = rows or []
+    """Records executed SQL and returns canned rows (or raises a canned error)."""
+
+    def __init__(self, result: QueryResult | None = None, error: Exception | None = None) -> None:
+        self.result = result or QueryResult(columns=[], rows=[])
+        self.error = error
         self.executed: list[str] = []
 
-    def __call__(self, sql: str) -> list[dict[str, Any]]:
+    def __call__(self, sql: str) -> QueryResult:
         self.executed.append(sql)
-        return self.rows
+        if self.error is not None:
+            raise self.error
+        return self.result
 
 
 @pytest.fixture
@@ -51,12 +53,11 @@ def fake_db() -> FakeQueryRunner:
 
 @pytest.fixture
 def client(fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner) -> Iterator[TestClient]:
+    """API client with the LLM and the database replaced by fakes (no network)."""
+    # _env_file=None: tests never depend on the developer's local .env.
     app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
     app.dependency_overrides[get_sql_generator] = lambda: fake_llm
     app.dependency_overrides[get_query_runner] = lambda: fake_db
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
-
-
-__all__ = ["FakeQueryRunner", "FakeSQLGenerator", "LLMError", "todo"]
