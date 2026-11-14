@@ -1,3 +1,6 @@
-from orders_nl.llm.client import LLMError, OpenAICompatibleSQLGenerator, SQLGenerator
+"""LLM integration: prompt construction and an OpenAI-compatible SQL generator."""
 
-__all__ = ["LLMError", "OpenAICompatibleSQLGenerator", "SQLGenerator"]
+from orders_nl.errors import LLMError, UnanswerableQuestionError
+from orders_nl.llm.client import OpenAICompatibleSQLGenerator, SQLGenerator
+
+__all__ = ["LLMError", "OpenAICompatibleSQLGenerator", "SQLGenerator", "UnanswerableQuestionError"]

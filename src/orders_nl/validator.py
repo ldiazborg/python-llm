@@ -18,21 +18,11 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from orders_nl.config import DB_SCHEMA
+from orders_nl.errors import InvalidQueryError  # re-exported for convenience
+
+__all__ = ["DEFAULT_RULES", "InvalidQueryError", "QueryPolicy", "Rule", "SqlValidator", "validate_sql"]
 
 MAX_SQL_LENGTH = 5000  # generated queries are short; long input is suspicious
-
-
-class InvalidQueryError(ValueError):
-    """The SQL is not a single, read-only query over the allowed tables.
-
-    `sql` holds the rejected statement when the caller attaches it, so API
-    responses can show what the LLM produced.
-    """
-
-    def __init__(self, reason: str, *, sql: str | None = None) -> None:
-        super().__init__(reason)
-        self.reason = reason
-        self.sql = sql
 
 
 @dataclass(frozen=True)
