@@ -1,0 +1,58 @@
+name: orders-nl
+
+services:
+  postgres:
+    image: postgres:17.6
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      READER_USER: ${READER_USER}
+      READER_PASSWORD: ${READER_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  vllm:
+    image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-v0.10.2}
+    command:
+      - --model=${LLM_MODEL_ID}
+      - --served-model-name=${LLM_MODEL}
+      - --api-key=${LLM_API_KEY}
+      - --dtype=half
+      - --max-model-len=${VLLM_MAX_MODEL_LEN:-2048}
+      - --gpu-memory-utilization=${VLLM_GPU_MEM_UTIL:-0.90}
+      # Small-GPU settings: no CUDA graphs (saves VRAM), few concurrent sequences.
+      - --enforce-eager
+      - --max-num-seqs=4
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    ports:
+      - "${VLLM_PORT:-8001}:8000"
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 120s
+
+volumes:
+  pgdata:
+  hf-cache:

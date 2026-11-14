@@ -1,0 +1,34 @@
+[project]
+name = "orders-nl"
+version = "0.1.0"
+description = "Orders dataset (generate, clean, load to PostgreSQL) + natural-language query API with a local LLM"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pandas>=2.2",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+    "sqlglot>=26",
+    "openai>=1.50",
+    "pydantic-settings>=2.6",
+]
+
+[project.scripts]
+orders-generate = "orders_nl.etl.generate:main"
+orders-load = "orders_nl.etl.load:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
