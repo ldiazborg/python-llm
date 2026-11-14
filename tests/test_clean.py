@@ -7,7 +7,7 @@ import pytest
 
 from conftest import todo
 from orders_nl.etl.clean import clean_orders
-from orders_nl.etl.generate import COLUMNS
+from orders_nl.domain import COLUMNS
 
 
 @pytest.fixture
@@ -20,7 +20,7 @@ def raw() -> pd.DataFrame:
         ["A4", "2025-03-17", "Juan Gil", "Chile", "Teclado", "", "completed"],  # empty amount
         ["A5", "", "Rosa Díaz", "Perú", "Laptop", "900", "cancelled"],  # empty date
     ]
-    return pd.DataFrame(rows, columns=COLUMNS, dtype=str)
+    return pd.DataFrame(rows, columns=list(COLUMNS), dtype=str)
 
 
 @todo
@@ -48,4 +48,4 @@ def test_no_missing_amounts_and_normalized_text(raw: pd.DataFrame) -> None:
     assert set(clean.loc[clean["order_id"].isin(["A1", "A2"]), "country"]) == {"España"}
     assert report.rows_in == len(raw)
     assert report.rows_out == len(clean)
-    assert list(clean.columns) == COLUMNS
+    assert tuple(clean.columns) == COLUMNS

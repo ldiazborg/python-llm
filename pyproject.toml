@@ -13,6 +13,7 @@ dependencies = [
     "sqlglot>=26",
     "openai>=1.50",
     "pydantic-settings>=2.6",
+    "faker>=30",
 ]
 
 [project.scripts]
