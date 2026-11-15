@@ -5,16 +5,21 @@ runs (a too-short question gets FastAPI's automatic 422), and FastAPI uses
 them to generate the OpenAPI schema shown at /docs.
 """
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 
 class AskRequest(BaseModel):
     """Body of POST /ask."""
 
     # 3..500 characters: rejects empty/accidental input and keeps prompts small.
-    question: str = Field(min_length=3, max_length=500, examples=["¿Cuánto vendimos en España en marzo?"])
+    # Surrounding whitespace is stripped first, so "   " is rejected as empty
+    # instead of being sent to the LLM (a wasted GPU call), and the length
+    # limits apply to the text that will actually be used.
+    question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=500)] = Field(
+        examples=["¿Cuánto vendimos en España en marzo?"]
+    )
     natural_answer: bool = Field(
         default=True,
         description="Also return the result as a sentence (one extra LLM call). False = data only.",

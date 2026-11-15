@@ -72,6 +72,17 @@ def test_invented_numbers_are_reported(answer: str, bad: list[str]) -> None:
     assert find_unsupported_numbers(answer, ALLOWED) == bad
 
 
+def test_large_results_do_not_license_arbitrary_small_numbers() -> None:
+    """Regression: 0..row_count was allowed, so a 300-row result accepted any figure up to 300."""
+    # Names without digits: digits inside text cells would count as data.
+    rows = [{"customer": f"Cliente {'x' * (i + 1)}", "total": 10000.5 + i} for i in range(300)]
+    allowed = allowed_numbers(rows, "¿Ventas por cliente?", "SELECT customer, total FROM orders", row_count=len(rows))
+    assert find_unsupported_numbers("El total de ventas fue de 250 €.", allowed) == ["250"]
+    assert find_unsupported_numbers("Las ventas subieron un 87 %.", allowed) == ["87"]
+    # The size of the result and the positions of a short list are still fine.
+    assert find_unsupported_numbers("Hay 300 clientes. 1. Cliente x; 2. Cliente xx.", allowed) == []
+
+
 # --- templates -----------------------------------------------------------------------
 
 

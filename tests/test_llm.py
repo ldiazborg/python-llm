@@ -90,6 +90,9 @@ def test_cannot_answer_is_a_distinct_error() -> None:
         ("  SELECT 1 ;  ", "SELECT 1"),
         ("```sql\nSELECT 1\n```", "SELECT 1"),
         ("Here you go:\n```\nSELECT 1;\n```\nHope it helps", "SELECT 1"),
+        ("```postgresql\nSELECT 1\n```", "SELECT 1"),  # other language tags (used to leak into the SQL)
+        ("```SQL\nSELECT 1;\n```", "SELECT 1"),
+        ("```SELECT 1```", "SELECT 1"),  # no tag: the SELECT must not be taken for one
     ],
 )
 def test_extract_sql(reply: str, expected: str) -> None:

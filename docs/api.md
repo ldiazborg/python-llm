@@ -5,7 +5,7 @@
 | Route | Notes |
 |---|---|
 | `GET /health` | liveness only; touches neither LLM nor DB |
-| `POST /ask` | body `AskRequest{question: 3..500 chars, natural_answer: bool = true}` → `AskResponse{question, answer, answer_source, sql, columns, rows, row_count}` |
+| `POST /ask` | body `AskRequest{question: 3..500 chars after stripping whitespace, natural_answer: bool = true}` → `AskResponse{question, answer, answer_source, sql, columns, rows, row_count}` |
 | `GET /docs` | OpenAPI UI; route docstrings and pydantic `Field` descriptions are shown here, so keep them user-facing |
 
 `sql` in the response is the **validated** SQL that was executed (normalized, with LIMIT), not the raw LLM output. With `natural_answer=false` the answer writer is never called and `answer`/`answer_source` are `null`.

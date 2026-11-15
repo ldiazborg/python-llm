@@ -29,6 +29,13 @@ _THOUSANDS_COMMA = re.compile(r"\d{1,3}(?:,\d{3})+")  # 1,234 / 12,345,678
 # so "unos 6.215 €" is accepted for 6215.32.
 _ROUNDING_STEPS = (Decimal("1"), Decimal("0.1"), Decimal("0.01"))
 
+# Highest list position ("1. ...", "2. ...") an answer may use without it
+# being a value of the data. An answer is one or two sentences about the rows
+# shown to the writer (20 by default, `ANSWER_MAX_ROWS`), so higher positions
+# are not plausible, and allowing 0..row_count for a 300-row result would
+# wave through any invented figure below 300.
+MAX_ENUMERATION = 20
+
 
 def _to_decimal(text: str) -> Decimal | None:
     """Decimal(text) if it is a finite number, else None (never raises)."""
@@ -86,13 +93,16 @@ def allowed_numbers(
     rows: Iterable[Mapping[str, Any]],
     *texts: str,
     row_count: int,
+    max_enumeration: int = MAX_ENUMERATION,
 ) -> set[Decimal]:
     """Numbers an answer may mention.
 
     - every value in the result rows
     - numbers in `texts` (the question and the executed SQL: "top 3", "2025",
       `month = 3`), which the answer may legitimately repeat
-    - 0..row_count, for counts and enumerations ("6 países", "1. ..., 2. ...")
+    - `row_count` itself ("se encontraron 300 resultados")
+    - 0..min(row_count, max_enumeration), for small counts and list positions
+      ("6 países", "1. ..., 2. ...")
     """
     allowed: set[Decimal] = set()
     # Every cell of every row (numbers, plus digits inside text and dates).
@@ -102,8 +112,10 @@ def allowed_numbers(
     # Numbers the user or the query already stated.
     for text in texts:
         allowed |= _values_in(text)
-    # Small integers for "hay 6 países" / "1. ... 2. ..." style phrasing.
-    allowed |= {Decimal(i) for i in range(row_count + 1)}
+    # The size of the result, and small integers for "hay 6 países" /
+    # "1. ... 2. ..." style phrasing. Capped: see MAX_ENUMERATION.
+    allowed.add(Decimal(row_count))
+    allowed |= {Decimal(i) for i in range(min(row_count, max_enumeration) + 1)}
     return allowed
 
 

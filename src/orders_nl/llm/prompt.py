@@ -92,8 +92,10 @@ FEW_SHOT_EXAMPLES: tuple[tuple[str, str], ...] = (
 )
 
 # ```sql ... ``` or ``` ... ``` blocks that models add despite the instructions.
+# The language tag is a fixed list (longest first), not "any word": a generic
+# \w+ would swallow the SELECT of an untagged "```SELECT ...```".
 # DOTALL: '.' also matches newlines (multi-line SQL); IGNORECASE: ```SQL works too.
-_FENCE_RE = re.compile(r"```(?:sql)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+_FENCE_RE = re.compile(r"```(?:postgresql|postgres|pgsql|sql)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
 def build_system_prompt(schema: str = SCHEMA_DESCRIPTION) -> str:
