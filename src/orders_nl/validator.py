@@ -68,9 +68,27 @@ def forbid_side_effects(tree: exp.Expression, policy: QueryPolicy) -> None:
         raise InvalidQueryError(f"Forbidden operation in query: {node.key.upper()}")
 
 
+def _cte_names(tree: exp.Expression) -> set[str]:
+    """Names of the CTEs (WITH name AS ...) defined anywhere in the query."""
+    return {cte.alias_or_name for cte in tree.find_all(exp.CTE)}
+
+
+def _is_cte_reference(table: exp.Table, cte_names: set[str]) -> bool:
+    """True when `table` points at a CTE of this query rather than a real relation.
+
+    Unqualified names resolve to a CTE first in PostgreSQL, so
+    `WITH orders AS (SELECT 1) SELECT * FROM orders` does NOT read the table.
+    """
+    return not table.db and table.name in cte_names
+
+
+def _allowed_list(policy: QueryPolicy) -> str:
+    return ", ".join(sorted(policy.allowed_tables))
+
+
 def restrict_tables(tree: exp.Expression, policy: QueryPolicy) -> None:
     """Every table read must be an allowed table/view, or a CTE defined in the query."""
-    cte_names = {cte.alias_or_name for cte in tree.find_all(exp.CTE)}
+    cte_names = _cte_names(tree)
     for table in tree.find_all(exp.Table):
         name, schema = table.name, table.db
         if not name:
@@ -78,11 +96,30 @@ def restrict_tables(tree: exp.Expression, policy: QueryPolicy) -> None:
             raise InvalidQueryError("Table functions are not allowed")
         if table.catalog or (schema and schema != policy.schema):
             raise InvalidQueryError(f"Access to {table.sql(dialect='postgres')} is not allowed")
-        if not schema and name in cte_names:
-            continue  # reference to a CTE; its body is checked as part of the tree
+        if _is_cte_reference(table, cte_names):
+            continue  # its body is checked as part of the tree
         if name not in policy.allowed_tables:
-            allowed = ", ".join(sorted(policy.allowed_tables))
-            raise InvalidQueryError(f"Table '{name}' is not allowed. Allowed: {allowed}")
+            raise InvalidQueryError(f"Table '{name}' is not allowed. Allowed: {_allowed_list(policy)}")
+
+
+def require_data_source(tree: exp.Expression, policy: QueryPolicy) -> None:
+    """The query must read at least one allowed table or view.
+
+    Catches off-topic answers from the LLM that are valid but unrelated SQL,
+    e.g. "¿Qué tiempo hace en Madrid?" -> `SELECT CURRENT_TIMESTAMP`, or
+    `SELECT 1`. Such queries are harmless but would return a misleading
+    "answer" to a question the data can't answer. CTEs only count through the
+    real tables their bodies read.
+    """
+    cte_names = _cte_names(tree)
+    reads_data = any(
+        table.name in policy.allowed_tables and not _is_cte_reference(table, cte_names)
+        for table in tree.find_all(exp.Table)
+    )
+    if not reads_data:
+        raise InvalidQueryError(
+            f"The query does not read any data table; it must use at least one of: {_allowed_list(policy)}"
+        )
 
 
 # Functions that read server files/settings, sleep, open connections or have
@@ -115,6 +152,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     require_query_root,
     forbid_side_effects,
     restrict_tables,
+    require_data_source,
     forbid_dangerous_functions,
 )
 

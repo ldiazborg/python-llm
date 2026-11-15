@@ -130,7 +130,7 @@ tests/                           unitarios + integration/ (opcionales)
 - `v_top_customers` desempata por nombre para devolver siempre exactamente 10 filas.
 
 **Seguridad de las consultas (dos barreras)**
-1. **Validador** sobre el AST de sqlglot (no expresiones regulares): una sola sentencia; raíz `SELECT`/`UNION`; ningún nodo de escritura en todo el árbol (también `DELETE` dentro de CTE, `SELECT INTO`, `FOR UPDATE`); solo las tablas permitidas y del esquema `analytics`; sin funciones de sistema (`pg_*`, `set_config`…); `LIMIT` máximo forzado.
+1. **Validador** sobre el AST de sqlglot (no expresiones regulares): una sola sentencia; raíz `SELECT`/`UNION`; ningún nodo de escritura en todo el árbol (también `DELETE` dentro de CTE, `SELECT INTO`, `FOR UPDATE`); solo las tablas permitidas y del esquema `analytics`; al menos una de ellas debe leerse (rechaza respuestas fuera de tema como `SELECT CURRENT_TIMESTAMP` a "¿Qué tiempo hace?"); sin funciones de sistema (`pg_*`, `set_config`…); `LIMIT` máximo forzado.
 2. **Base de datos**: la API usa un rol de **solo lectura** (`default_transaction_read_only`, solo `SELECT` en `analytics`, `statement_timeout` de 5 s) y además abre la sesión en modo read-only. Un fallo del validador no puede escribir datos.
 
 **LLM**
