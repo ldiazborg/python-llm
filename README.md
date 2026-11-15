@@ -531,7 +531,7 @@ SqlValidator(policy, rules=(*DEFAULT_RULES, no_select_star))
 
 - Dos barreras independientes: validador sobre el AST + rol de solo lectura con timeout (ver [Seguridad de las consultas](#seguridad-de-las-consultas)).
 - La API nunca usa las credenciales del administrador.
-- Docker publica PostgreSQL y vLLM solo en `127.0.0.1`: no son accesibles desde otros equipos de la red.
+- Docker publica PostgreSQL y vLLM solo en la interfaz local (`127.0.0.1` y `::1`): no son accesibles desde otros equipos de la red.
 
 **LLM**
 
@@ -565,6 +565,12 @@ Cada funcionalidad o tarea se desarrolló en su propia rama y se integró en `ma
 | `feat/natural-language-answer` | Respuesta redactada con comprobación de cifras                 |
 | `docs/code-comments`           | Comentarios y docstrings en todo el código                     |
 | `docs/readme-expanded`         | Esta versión ampliada del README                               |
+| `fix/validator-bypasses`       | Auditoría: ámbito de los CTE, nombres con/sin comillas, funciones, `WITH TIES` |
+| `fix/query-results`            | Auditoría: columnas repetidas, enteros, registro de errores de la BD |
+| `fix/clean-customer-spellings` | Auditoría: una sola grafía por cliente                         |
+| `fix/answer-and-request-checks` | Auditoría: comprobación de cifras más estricta, preguntas en blanco |
+| `fix/settings-validation`      | Auditoría: rangos válidos de la configuración                  |
+| `chore/compose-local-ports`, `fix/compose-ipv6-loopback` | Auditoría: puertos solo en la interfaz local |
 
 
 ## Solución de problemas
@@ -589,6 +595,11 @@ Cada funcionalidad o tarea se desarrolló en su propia rama y se integró en `ma
 - Respuestas en lenguaje natural: las comprobaciones garantizan que las cifras son reales y están bien atribuidas, pero **no que la frase sea completa** (con varias filas el modelo a veces menciona solo algunas; las filas completas siempre van en `rows`). Algunas cifras salen en formato inglés (`3386.21 €`). En listas y rankings el modelo de 1.5B suele desordenar los nombres, así que esas preguntas acaban a menudo en la plantilla.
 - "Marzo" sin año filtra todos los marzos; con datos de un solo año no importa, pero con varios años habría que pedir el año o usar el más reciente.
 - vLLM escribe `LLM_API_KEY` en su log de arranque (`non-default args`): no compartas esos logs.
+- **La lista de funciones prohibidas del validador es una lista negra**, y por tanto incompleta por naturaleza. Si se encontrara otra forma de saltarse el validador, el rol de solo lectura impide escribir, leer contraseñas o ficheros y cambiar la configuración de forma duradera, pero **sí podría leer metadatos del catálogo** de PostgreSQL (nombres de roles, parámetros, definición de las vistas), que cualquier rol puede consultar.
+- La comprobación de cifras de la respuesta acepta cualquier número que aparezca en la pregunta o en la SQL ejecutada (incluido el `LIMIT 1000` que añade el validador) y los dígitos dentro de valores de texto (`ORD-000250` permite "250"); no ve los números escritos con palabras ("tres mil", "el doble") ni distingue el signo.
+- El límite de la consulta es de **filas**, no de tamaño: una consulta que devuelva celdas enormes (`repeat(...)`) solo la corta el timeout de 5 s.
+- Los clientes se identifican por su nombre (no hay identificador): dos personas con el mismo nombre se cuentan como una.
+- Si el LLM no responde, la petición tarda ~1 minuto en fallar (30 s de timeout × 2 intentos); en el peor caso, con las dos llamadas (SQL y redacción) lentas, ~2 minutos.
 
 ## Qué haría con más tiempo
 
@@ -600,6 +611,14 @@ Cada funcionalidad o tarea se desarrolló en su propia rama y se integró en `ma
 - Autenticación y rate limiting en la API; métricas y trazas (preguntas, SQL, latencias, rechazos).
 - Dockerfile para la API y CI (tests unitarios + integración con Postgres como servicio).
 - Ruff + mypy en pre-commit.
+- **Pendiente tras la auditoría del código** (lo que era una funcionalidad nueva o un cambio de diseño no se implementó; los errores encontrados sí se corrigieron):
+  - *Validador*: sustituir la lista negra de funciones por una **lista blanca** (agregados, fechas, texto, matemáticas), que no depende de conocer todas las funciones peligrosas de PostgreSQL.
+  - *Base de datos*: fijar `statement_timeout` también en cada sesión (hoy solo lo garantiza la configuración del rol, que no existe si la base de datos se crea sin el script de inicio); un usuario propietario del esquema **sin superusuario** para el ETL (`POSTGRES_USER` lo es); límite de tamaño del resultado (bytes por celda y totales) además del de filas.
+  - *Limpieza*: descartar filas con `order_id`, cliente, país o producto vacíos; rechazar fechas fuera de un rango plausible (`01/01/0025` hoy se acepta) e importes en notación científica o con más de dos decimales (`1.234` se lee como 1,23 y `1e5` como 100000); informar de los `order_id` repetidos con datos distintos en vez de quedarse con el primero en silencio.
+  - *Carga*: tabla y vistas en una única transacción (hoy son tres: si fallan las vistas, la tabla ya está cargada) y migraciones del esquema (`CREATE TABLE IF NOT EXISTS` no actualiza el `CHECK` si cambian los estados).
+  - *Respuestas*: cerrar los huecos de la comprobación de cifras descritos en las limitaciones (no aceptar el `LIMIT` añadido ni los números de la pregunta como resultados, ignorar dígitos de identificadores); tratar los valores de texto de la base de datos como no confiables en el prompt de redacción (un nombre de cliente malicioso podría inyectar instrucciones: hoy solo se verifican las cifras de la frase, no su texto).
+  - *API*: mismo formato `{error, detail}` para los 422 de validación de la petición (hoy usan el de FastAPI); detectar SQL truncada por `max_tokens` (`finish_reason = "length"`) y devolver un error claro; un plazo máximo por petición; `/health` que compruebe también la base de datos y el LLM (*readiness*).
+  - *Docker*: pasar la clave a vLLM con la variable `VLLM_API_KEY` en lugar de `--api-key` (así no aparece en `docker inspect` ni en el log de arranque); pendiente de verificar con la versión fijada de vLLM.
 - **Interfaz de chat**: una página web sencilla para hacer preguntas sin usar `curl` ni `/docs`, que muestre la respuesta redactada, la SQL ejecutada y las filas en una tabla, con el historial de la conversación. Como siguiente paso, preguntas de seguimiento que usen el contexto anterior ("¿y en abril?").
 
 ## Cómo usé la IA
