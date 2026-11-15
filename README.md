@@ -163,5 +163,10 @@ tests/                           unitarios + integration/ (opcionales)
 
 ## Problemas conocidos
 
-- vLLM con 4 GB de VRAM va justo: si falla con *"not enough free memory"* baja `VLLM_GPU_MEM_UTIL`; si falla por falta de espacio para la caché KV, súbelo o baja `VLLM_MAX_MODEL_LEN`. Cierra otras aplicaciones que usen la GPU.
+- **vLLM con 4 GB de VRAM va justo.** `VLLM_GPU_MEM_UTIL` es la fracción de la VRAM *total* que reserva vLLM y no puede superar la memoria libre al arrancar. En Docker Desktop con WSL2 unos 0,8 GiB nunca están disponibles (WSL y el contexto CUDA): con una RTX 3050 de 4 GB solo quedan 3,21 GiB libres, así que **0.80 es el máximo**. Con ese valor caben los pesos (2,89 GiB), las activaciones (0,13 GiB) y ~6.000 tokens de caché KV, suficiente para `max-model-len=2048`.
+  - Si el contenedor termina con *"Free memory on device (…) is less than desired GPU memory utilization"*: baja `VLLM_GPU_MEM_UTIL` o cierra aplicaciones que usen la GPU (navegador, IDE, juegos).
+  - Si termina con *"No available memory for the cache blocks"*: súbelo un poco o baja `VLLM_MAX_MODEL_LEN`.
+  - Diagnóstico: `docker compose ps -a` (estado *Exited*) y `docker compose logs vllm`. Mientras vLLM no esté *healthy*, la API responde `502 llm_unavailable`.
+  - El primer arranque descarga el modelo (~3 GB) y tarda varios minutos; los siguientes usan la caché del volumen `hf-cache`.
+- vLLM escribe `LLM_API_KEY` en su log de arranque (`non-default args`): no compartas esos logs.
 - Un modelo de 1.5B se equivoca en preguntas complejas; el validador y los errores claros evitan que eso llegue a ejecutarse o se devuelva como un resultado engañoso.
