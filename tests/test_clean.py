@@ -12,6 +12,7 @@ from orders_nl.generation import GeneratorConfig, generate_orders
 
 @pytest.fixture
 def raw() -> pd.DataFrame:
+    """Six hand-made rows covering one example of each defect."""
     rows = [
         ["A1", "2025-03-15", "Ana López", "España", "Laptop", "100.50", "completed"],
         ["A1", "2025-03-15", "Ana López", "España", "Laptop", "100.50", "completed"],  # duplicate
@@ -24,12 +25,14 @@ def raw() -> pd.DataFrame:
 
 
 def test_removes_duplicates(raw: pd.DataFrame) -> None:
+    """The exact duplicate is removed and counted once."""
     clean, report = clean_orders(raw)
     assert clean["order_id"].is_unique
     assert report.duplicates_removed == 1
 
 
 def test_parses_mixed_date_formats_and_drops_unparseable(raw: pd.DataFrame) -> None:
+    """dd/mm/yyyy is repaired; impossible and empty dates drop the row."""
     clean, _ = clean_orders(raw)
     by_id = clean.set_index("order_id")
     assert by_id.loc["A2", "order_date"] == date(2025, 3, 16)
@@ -39,6 +42,7 @@ def test_parses_mixed_date_formats_and_drops_unparseable(raw: pd.DataFrame) -> N
 
 
 def test_no_missing_amounts_and_normalized_text(raw: pd.DataFrame) -> None:
+    """No blank amounts survive, countries are canonical, report totals match."""
     clean, report = clean_orders(raw)
     assert clean["amount"].notna().all()
     assert (clean["amount"] >= 0).all()
@@ -49,6 +53,7 @@ def test_no_missing_amounts_and_normalized_text(raw: pd.DataFrame) -> None:
 
 
 def test_repairs_comma_decimal_amounts() -> None:
+    """'12,50' becomes 12.5 and is counted as repaired."""
     raw = pd.DataFrame([["B1", "2025-01-02", "Ana", "Chile", "Ratón", "12,50", "completed"]], columns=list(COLUMNS))
     clean, report = clean_orders(raw)
     assert clean.loc[0, "amount"] == 12.5
@@ -56,6 +61,7 @@ def test_repairs_comma_decimal_amounts() -> None:
 
 
 def test_drops_unknown_status() -> None:
+    """A status outside OrderStatus drops the row and is counted."""
     raw = pd.DataFrame([["C1", "2025-01-02", "Ana", "Chile", "Ratón", "10", "lost"]], columns=list(COLUMNS))
     clean, report = clean_orders(raw)
     assert clean.empty
@@ -66,6 +72,7 @@ def test_custom_steps_replace_the_default_pipeline(raw: pd.DataFrame) -> None:
     """Only the given steps run: here nothing is parsed, so nothing is dropped."""
 
     def tag(df: pd.DataFrame, report: CleaningReport) -> pd.DataFrame:
+        """Toy step: overwrite every product name."""
         return df.assign(product="X")
 
     clean, report = clean_orders(raw, steps=[tag])
@@ -74,6 +81,7 @@ def test_custom_steps_replace_the_default_pipeline(raw: pd.DataFrame) -> None:
 
 
 def test_rejects_raw_data_without_required_columns() -> None:
+    """Missing columns fail early with a clear ValueError."""
     with pytest.raises(ValueError, match="missing columns"):
         clean_orders(pd.DataFrame({"order_id": ["A"]}))
 

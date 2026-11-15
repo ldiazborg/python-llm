@@ -1,4 +1,17 @@
-"""Choose the answer text: the LLM's sentence when it is grounded, else a template."""
+"""Choose the answer text: the LLM's sentence when it is grounded, else a template.
+
+Decision flow of `AnswerComposer.compose`:
+
+    no writer configured ............................ template
+    writer raises LLMError (down, timeout, empty) ... template
+    sentence empty or too long ...................... template
+    a number not found in the data .................. template
+    a number next to the wrong row/name ............. template
+    otherwise ....................................... LLM sentence
+
+Every discarded sentence is logged at WARNING level with the reason, which is
+the main tool for tuning the answer prompt.
+"""
 
 import logging
 from dataclasses import dataclass
@@ -12,6 +25,7 @@ from orders_nl.llm import AnswerWriter
 
 logger = logging.getLogger(__name__)
 
+# Where the answer text came from; exposed to API clients as `answer_source`.
 AnswerSource = Literal["llm", "template"]
 
 
@@ -30,10 +44,24 @@ class AnswerComposer:
     """
 
     def __init__(self, writer: AnswerWriter | None = None, *, max_length: int = 600) -> None:
+        """Create a composer.
+
+        Args:
+            writer: phrases results with an LLM; None = templates only.
+            max_length: longer sentences are rejected (the prompt asks for one or
+                two sentences; a very long reply usually means the model rambled).
+        """
         self._writer = writer
         self._max_length = max_length
 
     def compose(self, question: str, sql: str, result: QueryResult) -> NaturalAnswer:
+        """Return the best trustworthy answer for this result. Never raises LLMError.
+
+        Args:
+            question: the user's question (its numbers may be repeated).
+            sql: the executed SQL (its numbers may be repeated, e.g. month = 3).
+            result: the rows the answer must be faithful to.
+        """
         if self._writer is None:
             return self._template(result)
 
@@ -56,11 +84,12 @@ class AnswerComposer:
             return "empty"
         if len(text) > self._max_length:
             return f"longer than {self._max_length} characters"
+        # Check 1: every number exists somewhere in the data, question or SQL.
         allowed = allowed_numbers(result.rows, question, sql, row_count=len(result.rows))
         unsupported = find_unsupported_numbers(text, allowed)
         if unsupported:
             return f"numbers not in the data: {', '.join(unsupported)}"
-        # Real numbers can still be paired with the wrong row (e.g. a reversed ranking).
+        # Check 2: real numbers can still be paired with the wrong row (e.g. a reversed ranking).
         misattributed = find_misattributed_numbers(text, result.rows, question, sql)
         if misattributed:
             return f"numbers attributed to the wrong item: {', '.join(misattributed)}"
@@ -68,4 +97,5 @@ class AnswerComposer:
 
     @staticmethod
     def _template(result: QueryResult) -> NaturalAnswer:
+        """Deterministic fallback answer for `result`."""
         return NaturalAnswer(text=template_answer(result), source="template")

@@ -1,37 +1,47 @@
+# Project metadata and tooling, managed with uv (https://docs.astral.sh/uv/).
+#   uv sync            create .venv and install everything (incl. the dev group)
+#   uv add <pkg>       add a runtime dependency (updates this file + uv.lock)
+#   uv run <command>   run inside the project environment
+
 [project]
 name = "orders-nl"
 version = "0.1.0"
 description = "Orders dataset (generate, clean, load to PostgreSQL) + natural-language query API with a local LLM"
 readme = "README.md"
 requires-python = ">=3.12"
+# Lower bounds only; exact versions are pinned in uv.lock for reproducible installs.
 dependencies = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.32",
-    "pandas>=2.2",
-    "sqlalchemy>=2.0",
-    "psycopg[binary]>=3.2",
-    "sqlglot>=26",
-    "openai>=1.50",
-    "pydantic-settings>=2.6",
-    "faker>=30",
+    "fastapi>=0.115",          # HTTP API (required by the brief)
+    "uvicorn[standard]>=0.32", # ASGI server that runs the FastAPI app
+    "pandas>=2.2",             # CSV handling and cleaning
+    "sqlalchemy>=2.0",         # engine for pandas.to_sql (ETL load)
+    "psycopg[binary]>=3.2",    # PostgreSQL driver (ETL + read-only API queries)
+    "sqlglot>=26",             # SQL parser: AST-based validation of LLM output
+    "openai>=1.50",            # client for any OpenAI-compatible server (vLLM)
+    "pydantic-settings>=2.6",  # typed settings from .env / environment
+    "faker>=30",               # realistic synthetic customer names
 ]
 
+# Console commands installed into the environment: `uv run orders-generate`, ...
 [project.scripts]
 orders-generate = "orders_nl.etl.generate:main"
 orders-load = "orders_nl.etl.load:main"
 
+# Development-only dependencies (installed by `uv sync`, not by end users).
 [dependency-groups]
 dev = [
-    "pytest>=8.3",
-    "httpx>=0.27",
+    "pytest>=8.3",  # test runner
+    "httpx>=0.27",  # needed by FastAPI's TestClient; also used to mock LLM HTTP calls
 ]
 
+# uv's own build backend: packages src/orders_nl (src layout).
 [build-system]
 requires = ["uv_build>=0.9,<0.14"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# -ra: print a summary line for every skipped/failed test at the end.
 addopts = "-ra"
 markers = [
     "integration: needs the docker compose PostgreSQL (RUN_INTEGRATION=1)",

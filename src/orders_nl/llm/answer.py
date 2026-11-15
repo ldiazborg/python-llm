@@ -14,6 +14,8 @@ from orders_nl.config import Settings
 from orders_nl.db import QueryResult
 from orders_nl.llm.client import chat_completion, make_openai_client
 
+# Written in Spanish (unlike the SQL prompt) because the output must be Spanish:
+# instructing in the target language noticeably helps small models stay in it.
 ANSWER_SYSTEM_PROMPT = """\
 Eres un analista de datos. Redacta la respuesta a la pregunta del usuario a partir
 del resultado de una consulta SQL que ya se ha ejecutado.
@@ -42,7 +44,15 @@ ANSWER_EXAMPLE: tuple[str, str, list[str], list[dict[str, Any]], str] = (
 
 
 def _render_result(question: str, sql: str, columns: list[str], rows: list[dict[str, Any]], total: int) -> str:
-    """User message describing the question and (possibly truncated) result."""
+    """User message describing the question and (possibly truncated) result.
+
+    Example output:
+        Pregunta: ¿Cuánto vendimos en España en marzo?
+        Consulta ejecutada: SELECT SUM(total_amount) AS total_sales FROM ...
+        Columnas: total_sales
+        Filas (1): [{"total_sales": 6215.32}]
+    """
+    # "Filas (20 de 300)" tells the model it only sees part of the result.
     shown = f"{len(rows)} de {total}" if len(rows) < total else str(total)
     # default=str: dates and other non-JSON values become ISO strings.
     rows_json = json.dumps(rows, ensure_ascii=False, default=str)
@@ -55,8 +65,16 @@ def _render_result(question: str, sql: str, columns: list[str], rows: list[dict[
 
 
 def build_answer_messages(question: str, sql: str, result: QueryResult, *, max_rows: int) -> list[dict[str, str]]:
-    """Chat messages for the answer writer: rules, one example, then the real result."""
+    """Chat messages for the answer writer: rules, one example, then the real result.
+
+    Args:
+        question: the user's question.
+        sql: the SQL that produced `result` (gives the model the filters used).
+        result: the rows to phrase.
+        max_rows: rows included in the prompt; the rest are only counted.
+    """
     ex_question, ex_sql, ex_columns, ex_rows, ex_answer = ANSWER_EXAMPLE
+    # Column names from the cursor, or from the first row if a runner didn't set them.
     columns = result.columns or (list(result.rows[0]) if result.rows else [])
     return [
         {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
@@ -74,13 +92,23 @@ class AnswerWriter(Protocol):
     Must raise `LLMError` when it can't; callers then fall back to a template.
     """
 
-    def write_answer(self, question: str, sql: str, result: QueryResult) -> str: ...
+    def write_answer(self, question: str, sql: str, result: QueryResult) -> str:
+        """Return a short sentence answering `question` from `result`."""
+        ...
 
 
 class OpenAICompatibleAnswerWriter:
     """AnswerWriter backed by the same OpenAI-compatible server as the SQL generator."""
 
     def __init__(self, client: openai.OpenAI, model: str, *, max_rows: int = 20, max_tokens: int = 200) -> None:
+        """Create a writer.
+
+        Args:
+            client: OpenAI SDK client (real or with a mocked transport).
+            model: model name as served.
+            max_rows: result rows included in the prompt.
+            max_tokens: cap on the reply; 200 is plenty for one or two sentences.
+        """
         self._client = client
         self._model = model
         self._max_rows = max_rows
@@ -88,8 +116,13 @@ class OpenAICompatibleAnswerWriter:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "OpenAICompatibleAnswerWriter":
+        """Build a writer from the app settings (the normal way in the app)."""
         return cls(make_openai_client(settings), settings.llm_model, max_rows=settings.answer_max_rows)
 
     def write_answer(self, question: str, sql: str, result: QueryResult) -> str:
+        """Ask the model to phrase `result`. Raises LLMError on failure.
+
+        The sentence is NOT trusted here; AnswerComposer checks it.
+        """
         messages = build_answer_messages(question, sql, result, max_rows=self._max_rows)
         return chat_completion(self._client, self._model, messages, max_tokens=self._max_tokens)

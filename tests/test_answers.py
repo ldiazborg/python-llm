@@ -28,6 +28,7 @@ from orders_nl.errors import LLMError
     ],
 )
 def test_interpretations(token: str, expected: set[Decimal]) -> None:
+    """Numeric tokens are read under both Spanish and English notation."""
     assert interpretations(token) == expected
 
 
@@ -53,6 +54,7 @@ ALLOWED = allowed_numbers(ROWS, "¿Top 2 países en marzo?", "SELECT ... WHERE m
     ],
 )
 def test_grounded_answers_pass(answer: str) -> None:
+    """Sentences whose numbers all come from rows/question/SQL are accepted."""
     assert find_unsupported_numbers(answer, ALLOWED) == []
 
 
@@ -66,6 +68,7 @@ def test_grounded_answers_pass(answer: str) -> None:
     ],
 )
 def test_invented_numbers_are_reported(answer: str, bad: list[str]) -> None:
+    """Altered, computed or made-up numbers are reported, exactly as written."""
     assert find_unsupported_numbers(answer, ALLOWED) == bad
 
 
@@ -77,6 +80,7 @@ def test_invented_numbers_are_reported(answer: str, bad: list[str]) -> None:
     [(1138, "1.138"), (6215.32, "6.215,32"), (Decimal("0.5"), "0,50"), (1234567.891, "1.234.567,89")],
 )
 def test_format_number_spanish(value, expected: str) -> None:
+    """Template numbers use '.' for thousands and ',' for decimals."""
     assert format_number(value) == expected
 
 
@@ -97,10 +101,12 @@ def test_format_number_spanish(value, expected: str) -> None:
     ],
 )
 def test_template_answer(result: QueryResult, expected: str) -> None:
+    """Each result shape (empty, null, single value, single row, many rows) has its sentence."""
     assert template_answer(result) == expected
 
 
 def test_template_truncates_long_results() -> None:
+    """Long results list `max_items` rows and summarize the rest."""
     rows = [{"n": i} for i in range(8)]
     assert template_answer(QueryResult(["n"], rows), max_items=3) == "Se encontraron 8 resultados: 0; 1; 2; y 5 más."
 
@@ -113,16 +119,20 @@ SQL = "SELECT SUM(total_amount) AS total_sales FROM v_sales_by_month_country WHE
 
 
 class _Writer:
+    """Minimal AnswerWriter stub for composer tests."""
     def __init__(self, text: str = "", error: Exception | None = None) -> None:
+        """Configure the canned sentence or error."""
         self.text, self.error = text, error
 
     def write_answer(self, question: str, sql: str, result: QueryResult) -> str:
+        """Raise the canned error, or return the canned sentence."""
         if self.error:
             raise self.error
         return self.text
 
 
 def test_composer_uses_grounded_llm_text() -> None:
+    """A grounded sentence is returned (whitespace-stripped) with source 'llm'."""
     answer = AnswerComposer(_Writer("  En marzo se vendieron 6.215,32 € en España. ")).compose(QUESTION, SQL, RESULT)
     assert (answer.text, answer.source) == ("En marzo se vendieron 6.215,32 € en España.", "llm")
 
@@ -137,11 +147,13 @@ def test_composer_uses_grounded_llm_text() -> None:
     ],
 )
 def test_composer_falls_back_to_template(writer: _Writer) -> None:
+    """Invented numbers, empty/too-long text and LLM errors all fall back to the template."""
     answer = AnswerComposer(writer).compose(QUESTION, SQL, RESULT)
     assert (answer.text, answer.source) == ("El resultado es 6.215,32 (total_sales).", "template")
 
 
 def test_composer_without_writer_uses_template() -> None:
+    """With no writer configured, only templates are produced."""
     assert AnswerComposer(None).compose(QUESTION, SQL, RESULT).source == "template"
 
 
@@ -181,10 +193,12 @@ def test_reversed_ranking_is_detected() -> None:
     ],
 )
 def test_correct_attribution_passes(answer: str) -> None:
+    """Correct pairings pass, including accent-less names and question-only numbers."""
     assert find_misattributed_numbers(answer, TOP3, TOP3_Q, TOP3_SQL) == []
 
 
 def test_number_after_wrong_name_is_detected() -> None:
+    """Swapping two countries' figures is detected."""
     rows = [{"country": "Chile", "orders": 8}, {"country": "España", "orders": 35}]
     assert find_misattributed_numbers("En Chile hubo 8 pedidos y en España 35.", rows) == []
     assert find_misattributed_numbers("En Chile hubo 35 pedidos y en España 8.", rows) == ["35", "8"]
@@ -197,6 +211,7 @@ def test_name_in_many_rows_allows_any_of_its_values() -> None:
 
 
 def test_composer_rejects_misattributed_llm_answer() -> None:
+    """A misattributed sentence never reaches the client: template instead."""
     writer = _Writer("1. Hugo Colón Ríos con 13.127 €.\n2. Albano Llopis Hierro con 38.655 €.")
     answer = AnswerComposer(writer).compose(TOP3_Q, TOP3_SQL, QueryResult(list(TOP3[0]), TOP3))
     assert answer.source == "template"
@@ -210,6 +225,7 @@ def test_list_markers_follow_result_order_without_rank_column() -> None:
 
 
 def test_template_labels_rows_by_name_not_rank() -> None:
+    """Ranked rows are labelled by the customer name, not the rank number."""
     result = QueryResult(["customer_rank", "customer", "total_amount"], TOP3[:2])
     assert template_answer(result) == (
         "Se encontraron 2 resultados: "

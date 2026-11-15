@@ -39,9 +39,11 @@ def _completion(content: str | None) -> httpx.Response:
 
 
 def test_returns_sql_and_sends_prompt() -> None:
+    """The SQL is extracted from fences and the request carries model, temperature and prompt."""
     sent: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        """Capture the request body and reply with fenced SQL."""
         sent.update(json.loads(request.content))
         return _completion("```sql\nSELECT 1;\n```")
 
@@ -53,7 +55,9 @@ def test_returns_sql_and_sends_prompt() -> None:
 
 
 def test_connection_error_becomes_llm_error() -> None:
+    """A network failure becomes LLMError ('unavailable')."""
     def handler(request: httpx.Request) -> httpx.Response:
+        """Simulate the server refusing the connection."""
         raise httpx.ConnectError("refused")
 
     with pytest.raises(LLMError, match="unavailable"):
@@ -61,17 +65,20 @@ def test_connection_error_becomes_llm_error() -> None:
 
 
 def test_server_error_becomes_llm_error() -> None:
+    """An HTTP 500 from the server becomes LLMError."""
     with pytest.raises(LLMError):
         _generator(lambda r: httpx.Response(500, json={"error": "boom"})).generate_sql("q")
 
 
 @pytest.mark.parametrize("content", [None, "", "   "])
 def test_empty_reply_becomes_llm_error(content: str | None) -> None:
+    """A null, empty or blank completion becomes LLMError ('empty')."""
     with pytest.raises(LLMError, match="empty"):
         _generator(lambda r: _completion(content)).generate_sql("q")
 
 
 def test_cannot_answer_is_a_distinct_error() -> None:
+    """The CANNOT_ANSWER sentinel raises UnanswerableQuestionError."""
     with pytest.raises(UnanswerableQuestionError):
         _generator(lambda r: _completion(CANNOT_ANSWER)).generate_sql("¿Qué tiempo hace?")
 
@@ -86,10 +93,12 @@ def test_cannot_answer_is_a_distinct_error() -> None:
     ],
 )
 def test_extract_sql(reply: str, expected: str) -> None:
+    """SQL is extracted from plain, padded, fenced and chatty replies."""
     assert extract_sql(reply) == expected
 
 
 def test_prompt_contains_schema_and_examples() -> None:
+    """The system prompt names every table and the message list includes all examples."""
     messages = build_messages("q")
     system = messages[0]["content"]
     for name in ("orders", "v_sales_by_month_country", "v_top_customers", "'España'", "'completed'"):
@@ -106,6 +115,7 @@ from orders_nl.llm.answer import build_answer_messages  # noqa: E402
 
 
 def _answer_writer(handler, max_rows: int = 20) -> OpenAICompatibleAnswerWriter:
+    """Answer writer whose HTTP calls go to `handler` (no server needed)."""
     client = openai.OpenAI(
         base_url="http://llm.test/v1",
         api_key="test",
@@ -116,9 +126,11 @@ def _answer_writer(handler, max_rows: int = 20) -> OpenAICompatibleAnswerWriter:
 
 
 def test_answer_writer_sends_question_sql_and_rows() -> None:
+    """The prompt includes question, SQL and rows; the reply is stripped."""
     sent: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        """Capture the request body and reply with a padded sentence."""
         sent.update(json.loads(request.content))
         return _completion("  En marzo se vendieron 6.215,32 €.  ")
 
@@ -133,6 +145,7 @@ def test_answer_writer_sends_question_sql_and_rows() -> None:
 
 
 def test_answer_messages_cap_rows_and_say_so() -> None:
+    """Only `max_rows` rows are sent, and the prompt says how many exist."""
     result = QueryResult(columns=["n"], rows=[{"n": i} for i in range(50)])
     last = build_answer_messages("q", "SELECT n FROM orders", result, max_rows=3)[-1]["content"]
     assert "Filas (3 de 50)" in last
@@ -140,5 +153,6 @@ def test_answer_messages_cap_rows_and_say_so() -> None:
 
 
 def test_answer_writer_failure_is_llm_error() -> None:
+    """An HTTP 503 from the server becomes LLMError."""
     with pytest.raises(LLMError):
         _answer_writer(lambda r: httpx.Response(503)).write_answer("q", "SELECT 1", QueryResult([], []))

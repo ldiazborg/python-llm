@@ -1,32 +1,55 @@
+# Local infrastructure: PostgreSQL (data) + vLLM (local LLM, OpenAI-compatible API).
+# The FastAPI app itself runs on the host with `uv run uvicorn ...` for fast
+# iteration (auto-reload), not as a container.
+#
+# Every ${VAR} comes from `.env` (copy `.env.example`); `${VAR:-x}` falls back to x.
+#   docker compose up -d postgres vllm   # start
+#   docker compose ps -a                 # status / health
+#   docker compose logs vllm             # why vLLM exited (usually GPU memory)
+#   docker compose stop vllm             # free the GPU, keep everything cached
+
+# Project name: prefixes container/volume names (orders-nl-postgres-1, ...).
 name: orders-nl
 
 services:
   postgres:
-    image: postgres:17.6
+    image: postgres:17.6  # pinned: reproducible setups
     environment:
+      # Superuser created on first start; owns the `analytics` schema (ETL user).
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      # Read by docker/postgres/init/01-roles.sh to create the API's read-only role.
       READER_USER: ${READER_USER}
       READER_PASSWORD: ${READER_PASSWORD}
     ports:
+      # host:container. Change POSTGRES_PORT if 5432 is taken by a local Postgres.
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
+      # Named volume: data survives `docker compose down` (use `down -v` to wipe it).
       - pgdata:/var/lib/postgresql/data
+      # Scripts here run ONCE, when the data volume is empty (first start only).
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
+      # $$ escapes $ for compose, so the variable is expanded inside the container.
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 20
 
   vllm:
+    # Official vLLM image with the OpenAI-compatible server as entrypoint.
     image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-v0.10.2}
     command:
+      # Hugging Face model to download and serve.
       - --model=${LLM_MODEL_ID}
+      # Name clients must use in requests (the app's LLM_MODEL).
       - --served-model-name=${LLM_MODEL}
+      # Requests must send this key (Authorization: Bearer ...); same value as the app's LLM_API_KEY.
       - --api-key=${LLM_API_KEY}
+      # fp16 weights (the user's choice for the 1.5B model).
       - --dtype=half
+      # Max tokens per request (prompt + reply); bounds the KV cache needed.
       - --max-model-len=${VLLM_MAX_MODEL_LEN:-2048}
       # 0.80 is the measured maximum for a 4 GB GPU under WSL2 (see .env.example).
       - --gpu-memory-utilization=${VLLM_GPU_MEM_UTIL:-0.80}
@@ -34,26 +57,33 @@ services:
       - --enforce-eager
       - --max-num-seqs=4
     environment:
+      # Only needed for gated models; Qwen2.5-Coder is public.
       HF_TOKEN: ${HF_TOKEN:-}
     ports:
+      # Host 8001 -> container 8000, so it doesn't collide with uvicorn's 8000.
       - "${VLLM_PORT:-8001}:8000"
     volumes:
+      # Model cache: the ~3 GB download happens only on the first start.
       - hf-cache:/root/.cache/huggingface
+    # Shared memory for PyTorch inter-process communication (recommended by vLLM).
     ipc: host
     deploy:
       resources:
         reservations:
+          # Give the container the NVIDIA GPU (Docker Desktop: WSL2 backend required).
           devices:
             - driver: nvidia
               count: all
               capabilities: [gpu]
     healthcheck:
+      # The image has Python but not curl: poll vLLM's /health endpoint with urllib.
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
       timeout: 5s
       retries: 40
+      # Grace period for downloading and loading the model before failures count.
       start_period: 120s
 
 volumes:
-  pgdata:
-  hf-cache:
+  pgdata:  # PostgreSQL data files
+  hf-cache:  # downloaded model weights

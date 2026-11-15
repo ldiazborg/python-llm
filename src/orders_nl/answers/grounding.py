@@ -31,6 +31,7 @@ _ROUNDING_STEPS = (Decimal("1"), Decimal("0.1"), Decimal("0.01"))
 
 
 def _to_decimal(text: str) -> Decimal | None:
+    """Decimal(text) if it is a finite number, else None (never raises)."""
     try:
         value = Decimal(text)
     except InvalidOperation:
@@ -94,11 +95,14 @@ def allowed_numbers(
     - 0..row_count, for counts and enumerations ("6 países", "1. ..., 2. ...")
     """
     allowed: set[Decimal] = set()
+    # Every cell of every row (numbers, plus digits inside text and dates).
     for row in rows:
         for value in row.values():
             allowed |= _values_in(value)
+    # Numbers the user or the query already stated.
     for text in texts:
         allowed |= _values_in(text)
+    # Small integers for "hay 6 países" / "1. ... 2. ..." style phrasing.
     allowed |= {Decimal(i) for i in range(row_count + 1)}
     return allowed
 
@@ -107,6 +111,7 @@ def _with_roundings(values: Iterable[Decimal]) -> set[Decimal]:
     """Absolute values plus their roundings to 0, 1 and 2 decimal places."""
     expanded: set[Decimal] = set()
     for value in values:
+        # abs(): the number regex never captures a sign, so compare magnitudes.
         value = abs(value)
         expanded.add(value)
         for step in _ROUNDING_STEPS:
@@ -118,8 +123,17 @@ def _with_roundings(values: Iterable[Decimal]) -> set[Decimal]:
 
 
 def find_unsupported_numbers(answer: str, allowed: Iterable[Decimal]) -> list[str]:
-    """Number tokens in `answer` that match no allowed value (empty list = grounded)."""
+    """Number tokens in `answer` that match no allowed value (empty list = grounded).
+
+    Args:
+        answer: the LLM's sentence.
+        allowed: values the sentence may use (see `allowed_numbers`).
+
+    Returns:
+        The offending tokens as written, e.g. ["6.512,32", "85"].
+    """
     accepted = _with_roundings(allowed)
+    # A token passes if ANY of its readings (es/en) is accepted: set intersection.
     return [token for token, values in numbers_in_text(answer) if not (values & accepted)]
 
 
@@ -139,6 +153,7 @@ def find_unsupported_numbers(answer: str, allowed: Iterable[Decimal]) -> list[st
 # the question/SQL don't count for markers ("top 3" must not excuse "3. <1st>").
 # Numbers with no name to bind to are left to find_unsupported_numbers.
 
+# "1. " / "2) " at the start of a line (multiline mode: ^ matches after each \n).
 _LIST_MARKER = re.compile(r"(?m)^\s*(\d+)[.)]\s")
 # Sentence ends: newline, or ". " not preceded by a digit (so "1. Albano" and
 # "6.215,32" never split a sentence).
@@ -148,8 +163,10 @@ _MIN_NAME_LENGTH = 3  # ignore very short text values that would match anywhere
 
 @dataclass(frozen=True)
 class _Mention:
-    start: int
-    end: int
+    """One occurrence of a row name in the (folded) answer text."""
+
+    start: int  # character offset where the name starts
+    end: int  # offset just after the name
     values: frozenset[Decimal]  # numbers in the row(s) this name belongs to
     positions: frozenset[Decimal]  # 1-based positions of those rows in the result
 
@@ -160,7 +177,9 @@ def _name_mentions(folded_answer: str, rows: Iterable[Mapping[str, Any]]) -> lis
     values_by_name: dict[str, set[Decimal]] = {}
     positions_by_name: dict[str, set[Decimal]] = {}
     for position, row in enumerate(rows, start=1):
+        # All numbers of this row: what a name from this row may be paired with.
         row_values = {v for cell in row.values() for v in _values_in(cell)}
+        # Every text cell is a potential name (customer, country, product...).
         for cell in row.values():
             if isinstance(cell, str) and len(cell.strip()) >= _MIN_NAME_LENGTH:
                 name = fold(cell.strip())
@@ -168,11 +187,13 @@ def _name_mentions(folded_answer: str, rows: Iterable[Mapping[str, Any]]) -> lis
                 positions_by_name.setdefault(name, set()).add(Decimal(position))
 
     mentions: list[_Mention] = []
-    taken: list[tuple[int, int]] = []
+    taken: list[tuple[int, int]] = []  # spans already claimed by a longer name
     # Longest first so "Estados Unidos" wins over a shorter name inside it.
     for name in sorted(values_by_name, key=len, reverse=True):
+        # re.escape: names are matched literally ("Hugo (jr.)" must not be a regex).
         for match in re.finditer(re.escape(name), folded_answer):
             span = (match.start(), match.end())
+            # Two intervals [a, b) and [c, d) overlap iff a < d and c < b.
             if any(s < span[1] and span[0] < e for s, e in taken):
                 continue  # overlaps a longer name already found
             taken.append(span)
@@ -183,7 +204,7 @@ def _name_mentions(folded_answer: str, rows: Iterable[Mapping[str, Any]]) -> lis
 
 
 def _sentence_of(position: int, breaks: list[int]) -> int:
-    """Index of the sentence containing `position`."""
+    """Index of the sentence containing `position` (= sentence breaks before it)."""
     return sum(1 for b in breaks if b < position)
 
 
@@ -191,18 +212,24 @@ def find_misattributed_numbers(answer: str, rows: list[Mapping[str, Any]], *text
     """Number tokens placed next to a row they don't belong to (empty list = consistent).
 
     `texts` (question, SQL) hold numbers the answer may repeat anywhere.
+
+    Example (rows ranked Albano=1, Hugo=3):
+        "1. Hugo ... 13.127 €"  -> ["1"]   (Hugo is not rank/position 1)
+        "1. Albano ... 38.655 €" -> []
     """
     folded = fold(answer)  # same length as `answer` for Spanish text; positions stay aligned
     mentions = _name_mentions(folded, rows)
     if not mentions:
-        return []
+        return []  # no names in the sentence: nothing to bind numbers to
     breaks = [m.start() for m in _SENTENCE_BREAK.finditer(folded)]
     context = {v for text in texts for v in _values_in(text)}
+    # Offsets of the digits of each list marker ("1" in "1. Albano").
     markers = {m.start(1) for m in _LIST_MARKER.finditer(folded)}
 
     wrong: list[str] = []
     for match in _NUMBER_TOKEN.finditer(folded):
         values = interpretations(match.group())
+        # Skip non-numbers and digits that are part of a name itself.
         if not values or any(m.start <= match.start() < m.end for m in mentions):
             continue
         sentence = _sentence_of(match.start(), breaks)
@@ -217,6 +244,7 @@ def find_misattributed_numbers(answer: str, rows: list[Mapping[str, Any]], *text
             candidates = [m for m in mentions if m.end <= match.start() and _sentence_of(m.start, breaks) == sentence]
             bound = candidates[-1] if candidates else None
             accepted = (bound.values | context) if bound else frozenset()
+        # Unbound numbers (no name nearby) are not judged here.
         if bound is not None and not (values & _with_roundings(accepted)):
             wrong.append(match.group())
     return wrong
