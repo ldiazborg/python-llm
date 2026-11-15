@@ -98,10 +98,13 @@ def test_format_number_spanish(value, expected: str) -> None:
             QueryResult(["country", "orders"], [{"country": "Chile", "orders": 8}, {"country": "España", "orders": 35}]),
             "Se encontraron 2 resultados: Chile (orders 8); España (orders 35).",
         ),
+        # `SELECT FROM orders` is valid PostgreSQL: rows with no columns (used to raise IndexError).
+        (QueryResult([], [{}, {}]), "No se encontraron resultados para esta pregunta."),
+        (QueryResult([], [{}]), "No se encontraron resultados para esta pregunta."),
     ],
 )
 def test_template_answer(result: QueryResult, expected: str) -> None:
-    """Each result shape (empty, null, single value, single row, many rows) has its sentence."""
+    """Each result shape (empty, null, single value, single row, many rows, no columns) has its sentence."""
     assert template_answer(result) == expected
 
 

@@ -91,6 +91,38 @@ def test_runner_reports_columns_and_json_friendly_values(loaded, reader) -> None
     assert result.columns == ["country", "total"]  # known even with no rows
     total = reader("SELECT sum(amount) AS total FROM orders").rows[0]["total"]
     assert isinstance(total, float)
+    # numeric without decimals (SUM of a bigint, EXTRACT) is a count/year, not an amount.
+    row = reader("SELECT sum(orders) AS n, EXTRACT(YEAR FROM min(month_start)) AS y FROM v_sales_by_month_country").rows[0]
+    assert isinstance(row["n"], int) and isinstance(row["y"], int)
+
+
+def test_runner_keeps_columns_with_the_same_name(loaded, reader) -> None:
+    """Regression: `count`, `count` collapsed into one key and the first value was lost."""
+    result = reader("SELECT count(*), count(DISTINCT customer) FROM orders")
+    assert result.columns == ["count", "count_2"]
+    assert result.rows[0]["count"] == loaded.rows_loaded
+    assert 0 < result.rows[0]["count_2"] < loaded.rows_loaded
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Each one was accepted by the validator before the audit fixes; the role's
+        # grants and settings are what limit the damage if another bypass is found.
+        "SELECT set_config('statement_timeout', '0', false)",
+        "SELECT * FROM pg_authid",
+        "SELECT pg_read_file('/etc/passwd')",
+    ],
+)
+def test_api_role_is_contained_without_the_validator(loaded, reader, sql: str) -> None:
+    """Run raw (unvalidated) SQL as the API role: it still can't change settings or read secrets."""
+    try:
+        reader(sql)
+    except AppError:
+        return  # rejected outright
+    # set_config succeeds, but only for that one short-lived connection:
+    # the next query gets a fresh session with the role's 5 s timeout again.
+    assert reader("SELECT current_setting('statement_timeout') AS t").rows[0]["t"] == "5s"
 
 
 def test_database_rejection_is_an_invalid_query(loaded, reader) -> None:
@@ -99,6 +131,9 @@ def test_database_rejection_is_an_invalid_query(loaded, reader) -> None:
 
     with pytest.raises(InvalidQueryError, match="does not exist"):
         reader("SELECT no_such_column FROM orders")
+    # A scalar subquery returning many rows is also the query's fault (SQLSTATE 21000), not a 500.
+    with pytest.raises(InvalidQueryError, match="more than one row"):
+        reader("SELECT (SELECT customer FROM orders) AS c FROM orders")
 
 
 def test_statement_timeout_is_reported(loaded, reader) -> None:
