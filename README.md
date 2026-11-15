@@ -5,7 +5,7 @@ Proyecto en Python que:
 1. **Carga**: genera un CSV de pedidos con errores intencionados (Faker), lo limpia y lo guarda en **PostgreSQL**.
 2. **Modelos**: dos vistas SQL, ventas por mes y país, y los 10 clientes que más compran.
 3. **API (FastAPI)**: recibe una pregunta en lenguaje natural, un **LLM local (vLLM en Docker)** la convierte en SQL, la consulta se **valida** (solo lectura, solo tablas permitidas) y se devuelve el resultado, **redactado también en lenguaje natural** (con cada cifra comprobada contra los datos), o un error claro.
-4. **Tests** con pytest: 254 tests unitarios (sin Docker) y 13 de integración contra PostgreSQL real.
+4. **Tests** con pytest: 261 tests unitarios (sin Docker) y 13 de integración contra PostgreSQL real.
 
 ```text
 "¿Cuánto vendimos en España en marzo?"
@@ -126,7 +126,7 @@ En `http://localhost:8000/docs` está la documentación interactiva (OpenAPI) pa
 
 ## Configuración
 
-Todas las variables están documentadas en `.env.example`. Las lee `docker compose` (infraestructura) o la aplicación (`config.py`, con `pydantic-settings`); las variables de entorno reales tienen prioridad sobre `.env`.
+Todas las variables están documentadas en `.env.example`. Las lee `docker compose` (infraestructura) o la aplicación (`config.py`, con `pydantic-settings`); las variables de entorno reales tienen prioridad sobre `.env`. Los valores numéricos se validan al arrancar (`QUERY_ROW_LIMIT`, `ANSWER_MAX_ROWS` ≥ 1; `LLM_TIMEOUT_S` > 0; puerto válido): un valor imposible detiene la aplicación con un mensaje que nombra la variable.
 
 
 | Variable                              | Por defecto                        | Usada por     | Descripción                                                                              |
@@ -405,7 +405,7 @@ Los motivos de cada frase descartada quedan en el log del servidor (`Discarded L
 ## Tests
 
 ```bash
-uv run pytest                                   # 254 tests unitarios: sin Docker; LLM y BD simulados
+uv run pytest                                   # 261 tests unitarios: sin Docker; LLM y BD simulados
 
 docker compose up -d postgres                   # integración: PostgreSQL real
 RUN_INTEGRATION=1 uv run pytest -m integration  # 13 tests (vacían y recargan analytics.orders)
@@ -424,6 +424,7 @@ En PowerShell: `$env:RUN_INTEGRATION = "1"; uv run pytest -m integration`. Los t
 | `test_llm.py`                  | 18    | Clientes LLM con la capa HTTP simulada: errores, `CANNOT_ANSWER`, prompts          |
 | `test_answers.py`              | 47    | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas |
 | `test_db.py`                   | 25    | Conversión de valores a JSON, columnas repetidas, traducción de errores de la BD   |
+| `test_config.py`               | 7     | Rangos válidos de la configuración y cadenas de conexión con caracteres especiales |
 | `test_api.py`                  | 23    | Endpoint con LLM y BD simulados: éxito, cada código de error, respuesta redactada  |
 | `integration/test_postgres.py` | 13    | Carga real, idempotencia, vistas, permisos del rol, timeout, columnas repetidas    |
 

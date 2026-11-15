@@ -13,11 +13,11 @@ Two kinds of values live in this module:
 """
 
 from functools import lru_cache
-from urllib.parse import quote_plus
 
 from psycopg.conninfo import make_conninfo
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
 
 # Schema that holds the cleaned table and the views. It is created, together with
 # the read-only role's grants, by docker/postgres/init/01-roles.sh.
@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     Real environment variables win over values in `.env`. Secrets are
     `SecretStr`, so they are masked (`**********`) if the settings object is
     ever printed or logged; read them explicitly with `.get_secret_value()`.
+
+    Numeric settings carry their valid range (`Field(ge=...)`), so a typo such
+    as `QUERY_ROW_LIMIT=0` stops the app at startup with a message naming the
+    variable, instead of every question failing later with a database error.
     """
 
     # env_file: also read `.env` from the working directory.
@@ -50,7 +54,7 @@ class Settings(BaseSettings):
 
     # --- PostgreSQL ------------------------------------------------------------
     pg_host: str = "localhost"
-    postgres_port: int = 5432  # host port published by docker compose
+    postgres_port: int = Field(default=5432, ge=1, le=65535)  # host port published by docker compose
     postgres_db: str = "orders"
     # Owner of the `analytics` schema: used by the ETL to create and load tables.
     postgres_user: str = "orders_admin"
@@ -63,28 +67,34 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:8001/v1"
     llm_model: str = "qwen-coder"  # name the server exposes (vLLM --served-model-name)
     llm_api_key: SecretStr = SecretStr("")  # shared secret with vLLM's --api-key
-    llm_timeout_s: float = 30.0  # per request; a slow local GPU needs some slack
+    llm_timeout_s: float = Field(default=30.0, gt=0)  # per request; a slow local GPU needs some slack
 
     # --- Guardrails ------------------------------------------------------------
     # Maximum rows any generated query may return (the validator adds/clamps LIMIT).
-    query_row_limit: int = 1000
+    query_row_limit: int = Field(default=1000, ge=1)
 
     # Natural-language answers: max result rows shown to the answer-writing LLM
     # (keeps the prompt inside the model's context window).
-    answer_max_rows: int = 20
+    answer_max_rows: int = Field(default=20, ge=1)
 
     @property
     def admin_sqlalchemy_url(self) -> str:
         """Owner/ETL connection (SQLAlchemy URL, psycopg 3 driver).
 
-        The password is URL-encoded because characters such as `@`, `/` or `:`
-        would otherwise break the URL syntax.
+        Built with `URL.create`, which percent-encodes every part: a password
+        (or user/database name) containing `@`, `/`, `:` or `%` would otherwise
+        break the URL syntax or be read as something else.
         """
-        pwd = quote_plus(self.postgres_password.get_secret_value())
-        return (
-            f"postgresql+psycopg://{self.postgres_user}:{pwd}"
-            f"@{self.pg_host}:{self.postgres_port}/{self.postgres_db}"
+        url = URL.create(
+            "postgresql+psycopg",
+            username=self.postgres_user,
+            password=self.postgres_password.get_secret_value(),
+            host=self.pg_host,
+            port=self.postgres_port,
+            database=self.postgres_db,
         )
+        # hide_password=False: str(url) would mask it as "***".
+        return url.render_as_string(hide_password=False)
 
     @property
     def reader_conninfo(self) -> str:
