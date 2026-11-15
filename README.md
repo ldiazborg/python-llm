@@ -547,6 +547,7 @@ Cada funcionalidad o tarea se desarrolló en su propia rama y se integró en `ma
 - Autenticación y rate limiting en la API; métricas y trazas (preguntas, SQL, latencias, rechazos).
 - Dockerfile para la API y CI (tests unitarios + integración con Postgres como servicio).
 - Ruff + mypy en pre-commit.
+- **Interfaz de chat**: una página web sencilla para hacer preguntas sin usar `curl` ni `/docs`, que muestre la respuesta redactada, la SQL ejecutada y las filas en una tabla, con el historial de la conversación. Como siguiente paso, preguntas de seguimiento que usen el contexto anterior ("¿y en abril?").
 
 ## Cómo usé la IA
 
