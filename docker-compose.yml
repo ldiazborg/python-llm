@@ -24,9 +24,13 @@ services:
       READER_PASSWORD: ${READER_PASSWORD}
     ports:
       # ip:host:container. Change POSTGRES_PORT if 5432 is taken by a local Postgres.
-      # 127.0.0.1: reachable from this machine only. Without it Docker publishes
-      # the port on every network interface, i.e. to the whole LAN/Wi-Fi.
+      # Loopback only: reachable from this machine, not from the LAN/Wi-Fi
+      # (without an address Docker publishes the port on every interface).
+      # Both loopback addresses, because `localhost` resolves to ::1 first on
+      # Windows: with only 127.0.0.1 every connection waits ~2 s for the IPv6
+      # attempt to be refused before falling back.
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "[::1]:${POSTGRES_PORT:-5432}:5432"
     volumes:
       # Named volume: data survives `docker compose down` (use `down -v` to wipe it).
       - pgdata:/var/lib/postgresql/data
@@ -63,8 +67,10 @@ services:
       HF_TOKEN: ${HF_TOKEN:-}
     ports:
       # Host 8001 -> container 8000, so it doesn't collide with uvicorn's 8000.
-      # 127.0.0.1: only the API on this machine talks to the model.
+      # Loopback only (IPv4 and IPv6, see postgres above): only the API on this
+      # machine talks to the model.
       - "127.0.0.1:${VLLM_PORT:-8001}:8000"
+      - "[::1]:${VLLM_PORT:-8001}:8000"
     volumes:
       # Model cache: the ~3 GB download happens only on the first start.
       - hf-cache:/root/.cache/huggingface
