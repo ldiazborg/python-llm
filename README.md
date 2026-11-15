@@ -126,7 +126,7 @@ En `http://localhost:8000/docs` está la documentación interactiva (OpenAPI) pa
 
 ## Configuración
 
-Todas las variables están documentadas en `.env.example`. Las lee `docker compose` (infraestructura) o la aplicación (`config.py`, con `pydantic-settings`); las variables de entorno reales tienen prioridad sobre `.env`. Los valores numéricos se validan al arrancar (`QUERY_ROW_LIMIT`, `ANSWER_MAX_ROWS` ≥ 1; `LLM_TIMEOUT_S` > 0; puerto válido): un valor imposible detiene la aplicación con un mensaje que nombra la variable.
+Todas las variables están documentadas en `.env.example`. Las lee `docker compose` (infraestructura) o la aplicación (`config.py`, con `pydantic-settings`); las variables de entorno reales tienen prioridad sobre `.env`. Los valores numéricos se validan al arrancar (`QUERY_ROW_LIMIT`, `ANSWER_MAX_ROWS` ≥ 1; `LLM_TIMEOUT_S` &gt; 0; puerto válido): un valor imposible detiene la aplicación con un mensaje que nombra la variable.
 
 
 | Variable                              | Por defecto                        | Usada por     | Descripción                                                                              |
@@ -169,6 +169,10 @@ Genera pedidos válidos con **Faker** (nombres con el locale de cada país) y de
 
 
 
+
+&nbsp;
+
+
 | Defecto               | Tasa | Qué hace                                                                                                                                            |
 | --------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MalformedDates`      | 6 %  | Reescribe la fecha en otro formato (`15/03/2025`, `20250315`, …); un 25 % de ellas se vuelven imposibles (`2025-13-45`, `31/02/2025`, `N/A`, vacía) |
@@ -185,15 +189,15 @@ Opciones: `--rows`, `--seed`, `--out` y `--clean` (sin defectos).
 Un *pipeline* de pasos independientes (`etl/clean.py`); cada uno corrige un tipo de problema y anota lo que hizo en un `CleaningReport`:
 
 
-| Paso                    | Qué hace                                                                                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------------------- |
-| `normalize_text`        | Recorta espacios, unifica países (`ESPANA`, `españa` → `España`) y pasa los estados a minúsculas          |
-| `unify_customer_spellings` | Un cliente, una grafía: `ANA LÓPEZ` y `ana lopez` pasan a `Ana López` (la más frecuente en los datos)  |
-| `drop_exact_duplicates` | Elimina filas idénticas (tras normalizar el texto)                                                        |
-| `parse_dates`           | Acepta 8 formatos (día primero); descarta las fechas imposibles o vacías                                  |
-| `parse_amounts`         | Acepta coma decimal, separadores de miles y símbolo €; descarta importes vacíos, no numéricos o negativos |
-| `drop_invalid_status`   | Descarta estados desconocidos (la tabla tiene un `CHECK`)                                                 |
-| `drop_duplicate_ids`    | Un `order_id` repetido se queda con la primera fila                                                       |
+| Paso                       | Qué hace                                                                                                  |
+| -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `normalize_text`           | Recorta espacios, unifica países (`ESPANA`, `españa` → `España`) y pasa los estados a minúsculas          |
+| `unify_customer_spellings` | Un cliente, una grafía: `ANA LÓPEZ` y `ana lopez` pasan a `Ana López` (la más frecuente en los datos)     |
+| `drop_exact_duplicates`    | Elimina filas idénticas (tras normalizar el texto)                                                        |
+| `parse_dates`              | Acepta 8 formatos (día primero); descarta las fechas imposibles o vacías                                  |
+| `parse_amounts`            | Acepta coma decimal, separadores de miles y símbolo €; descarta importes vacíos, no numéricos o negativos |
+| `drop_invalid_status`      | Descarta estados desconocidos (la tabla tiene un `CHECK`)                                                 |
+| `drop_duplicate_ids`       | Un `order_id` repetido se queda con la primera fila                                                       |
 
 
 Cada fila de entrada queda contabilizada: `rows_out = rows_in − duplicados − descartadas`. Con los datos por defecto se conservan 1.138 de 1.236 filas (~92 %).
@@ -283,8 +287,8 @@ SELECT * FROM analytics.v_top_customers LIMIT 3;
 | `sql`                          | La SQL **validada que se ejecutó** (con `LIMIT`)                           |
 | `columns`, `rows`, `row_count` | El resultado completo                                                      |
 
-Cada fila es un objeto `{columna: valor}`. Si la consulta devuelve dos columnas con el mismo nombre (`SELECT COUNT(*), COUNT(DISTINCT customer)` → `count`, `count`), la segunda se renombra (`count_2`) para no perder ningún valor. Los `numeric` sin decimales (conteos, años) llegan como enteros y los importes como decimales.
 
+Cada fila es un objeto `{columna: valor}`. Si la consulta devuelve dos columnas con el mismo nombre (`SELECT COUNT(*), COUNT(DISTINCT customer)` → `count`, `count`), la segunda se renombra (`count_2`) para no perder ningún valor. Los `numeric` sin decimales (conteos, años) llegan como enteros y los importes como decimales.
 
 ### Ejemplos
 
@@ -415,18 +419,18 @@ uv run orders-load                              # después, recargar el conjunto
 En PowerShell: `$env:RUN_INTEGRATION = "1"; uv run pytest -m integration`. Los tests de integración se omiten salvo que `RUN_INTEGRATION=1`, porque modifican la base de datos.
 
 
-| Archivo                        | Tests | Qué cubre                                                                          |
-| ------------------------------ | ----- | ---------------------------------------------------------------------------------- |
-| `test_generate.py`             | 6     | Tamaño, reproducibilidad, cada defecto aparece, defectos componibles               |
-| `test_parsers.py`              | 32    | Formatos de fecha e importe aceptados y rechazados, normalización de texto         |
-| `test_clean.py`                | 10    | Duplicados, fechas, importes, estados, grafías de clientes, generador → limpieza   |
+| Archivo                        | Tests | Qué cubre                                                                           |
+| ------------------------------ | ----- | ----------------------------------------------------------------------------------- |
+| `test_generate.py`             | 6     | Tamaño, reproducibilidad, cada defecto aparece, defectos componibles                |
+| `test_parsers.py`              | 32    | Formatos de fecha e importe aceptados y rechazados, normalización de texto          |
+| `test_clean.py`                | 10    | Duplicados, fechas, importes, estados, grafías de clientes, generador → limpieza    |
 | `test_validator.py`            | 93    | 19 consultas válidas, 52 ataques, límites, ámbito de los CTE, reglas personalizadas |
-| `test_llm.py`                  | 18    | Clientes LLM con la capa HTTP simulada: errores, `CANNOT_ANSWER`, prompts          |
-| `test_answers.py`              | 47    | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas |
-| `test_db.py`                   | 25    | Conversión de valores a JSON, columnas repetidas, traducción de errores de la BD   |
-| `test_config.py`               | 7     | Rangos válidos de la configuración y cadenas de conexión con caracteres especiales |
-| `test_api.py`                  | 23    | Endpoint con LLM y BD simulados: éxito, cada código de error, respuesta redactada  |
-| `integration/test_postgres.py` | 13    | Carga real, idempotencia, vistas, permisos del rol, timeout, columnas repetidas    |
+| `test_llm.py`                  | 18    | Clientes LLM con la capa HTTP simulada: errores, `CANNOT_ANSWER`, prompts           |
+| `test_answers.py`              | 47    | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas  |
+| `test_db.py`                   | 25    | Conversión de valores a JSON, columnas repetidas, traducción de errores de la BD    |
+| `test_config.py`               | 7     | Rangos válidos de la configuración y cadenas de conexión con caracteres especiales  |
+| `test_api.py`                  | 23    | Endpoint con LLM y BD simulados: éxito, cada código de error, respuesta redactada   |
+| `integration/test_postgres.py` | 13    | Carga real, idempotencia, vistas, permisos del rol, timeout, columnas repetidas     |
 
 
 Los tres tests que pide el enunciado: limpieza (`test_clean.py`), validación de la consulta (`test_validator.py`) y endpoint con el LLM simulado (`test_api.py`).
@@ -551,26 +555,26 @@ SqlValidator(policy, rules=(*DEFAULT_RULES, no_select_star))
 Cada funcionalidad o tarea se desarrolló en su propia rama y se integró en `master` con `git merge --no-ff`, para que cada una quede visible en el historial (`git log --graph`):
 
 
-| Rama                           | Contenido                                                      |
-| ------------------------------ | -------------------------------------------------------------- |
-| `chore/project-scaffolding`    | Estructura, Docker Compose, configuración, esqueleto de la API |
-| `feat/data-generation`         | Generador con Faker y defectos                                 |
-| `feat/data-cleaning`           | Parsers y pipeline de limpieza                                 |
-| `feat/postgres-load-and-views` | Carga, tabla, vistas y tests de integración                    |
-| `feat/sql-validator`           | Validación sobre el AST                                        |
-| `feat/nl-query-endpoint`       | Servicio, prompt y endpoint `/ask`                             |
-| `docs/readme`                  | Primera versión de este README                                 |
-| `fix/require-table-reference`  | Regla "leer al menos una tabla"                                |
-| `chore/vllm-memory-defaults`   | `VLLM_GPU_MEM_UTIL=0.80` para GPUs de 4 GB                     |
-| `feat/natural-language-answer` | Respuesta redactada con comprobación de cifras                 |
-| `docs/code-comments`           | Comentarios y docstrings en todo el código                     |
-| `docs/readme-expanded`         | Esta versión ampliada del README                               |
-| `fix/validator-bypasses`       | Auditoría: ámbito de los CTE, nombres con/sin comillas, funciones, `WITH TIES` |
-| `fix/query-results`            | Auditoría: columnas repetidas, enteros, registro de errores de la BD |
-| `fix/clean-customer-spellings` | Auditoría: una sola grafía por cliente                         |
-| `fix/answer-and-request-checks` | Auditoría: comprobación de cifras más estricta, preguntas en blanco |
-| `fix/settings-validation`      | Auditoría: rangos válidos de la configuración                  |
-| `chore/compose-local-ports`, `fix/compose-ipv6-loopback` | Auditoría: puertos solo en la interfaz local |
+| Rama                                                     | Contenido                                                                      |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `chore/project-scaffolding`                              | Estructura, Docker Compose, configuración, esqueleto de la API                 |
+| `feat/data-generation`                                   | Generador con Faker y defectos                                                 |
+| `feat/data-cleaning`                                     | Parsers y pipeline de limpieza                                                 |
+| `feat/postgres-load-and-views`                           | Carga, tabla, vistas y tests de integración                                    |
+| `feat/sql-validator`                                     | Validación sobre el AST                                                        |
+| `feat/nl-query-endpoint`                                 | Servicio, prompt y endpoint `/ask`                                             |
+| `docs/readme`                                            | Primera versión de este README                                                 |
+| `fix/require-table-reference`                            | Regla "leer al menos una tabla"                                                |
+| `chore/vllm-memory-defaults`                             | `VLLM_GPU_MEM_UTIL=0.80` para GPUs de 4 GB                                     |
+| `feat/natural-language-answer`                           | Respuesta redactada con comprobación de cifras                                 |
+| `docs/code-comments`                                     | Comentarios y docstrings en todo el código                                     |
+| `docs/readme-expanded`                                   | Esta versión ampliada del README                                               |
+| `fix/validator-bypasses`                                 | Auditoría: ámbito de los CTE, nombres con/sin comillas, funciones, `WITH TIES` |
+| `fix/query-results`                                      | Auditoría: columnas repetidas, enteros, registro de errores de la BD           |
+| `fix/clean-customer-spellings`                           | Auditoría: una sola grafía por cliente                                         |
+| `fix/answer-and-request-checks`                          | Auditoría: comprobación de cifras más estricta, preguntas en blanco            |
+| `fix/settings-validation`                                | Auditoría: rangos válidos de la configuración                                  |
+| `chore/compose-local-ports`, `fix/compose-ipv6-loopback` | Auditoría: puertos solo en la interfaz local                                   |
 
 
 ## Solución de problemas
@@ -636,4 +640,3 @@ Cada funcionalidad o tarea se desarrolló en su propia rama y se integró en `ma
   - **Resultados incorrectos sin ningún error.** `SELECT COUNT(*), COUNT(DISTINCT customer)` devolvía un solo valor (dos columnas llamadas `count` en un diccionario); `(SELECT …) ORDER BY x LIMIT n` perdía el orden y el límite; los conteos llegaban como `862.0`; y la limpieza no unificaba los nombres de cliente, de modo que 4 de los 10 totales de `v_top_customers` eran demasiado bajos.
   - **La comprobación de cifras tenía un hueco**: con un resultado de 300 filas aceptaba cualquier número entero hasta 300 como si estuviera en los datos.
   - **Operación**: los errores de la base de datos no se registraban en ningún log, la conexión no tenía timeout y Docker publicaba PostgreSQL y vLLM en toda la red local.
-- **Lo que aprendí de usarla así**: que los tests pasen no significa que el código sea correcto cuando quien escribe ambos es el mismo; la revisión solo fue útil al **ejecutar** cada sospecha contra la base de datos real en vez de razonar sobre el código. Y las correcciones de la IA también hay que verificarlas: al limitar los puertos a `127.0.0.1`, cada conexión pasó a tardar 2 s más en Windows (`localhost` resuelve primero a IPv6); lo delataron los tests de integración y se corrigió publicando también en `::1`. Lo que la auditoría no corrigió está en [Problemas conocidos y limitaciones](#problemas-conocidos-y-limitaciones).
