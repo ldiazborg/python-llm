@@ -21,10 +21,18 @@ def test_health(client: TestClient) -> None:
     assert client.get("/health").json() == {"status": "ok"}
 
 
-@pytest.mark.parametrize("question", ["", "ab", "x" * 501])
-def test_ask_validates_question_length(client: TestClient, question: str) -> None:
-    """Empty, too-short and too-long questions are rejected by request validation."""
+@pytest.mark.parametrize("question", ["", "ab", "x" * 501, "      ", " \n\t ", "  ab  "])
+def test_ask_validates_question_length(client: TestClient, fake_llm: FakeSQLGenerator, question: str) -> None:
+    """Empty, blank, too-short and too-long questions are rejected before any LLM call."""
     assert client.post("/ask", json={"question": question}).status_code == 422
+    assert fake_llm.questions == []
+
+
+def test_ask_strips_whitespace_around_the_question(client: TestClient, fake_llm: FakeSQLGenerator) -> None:
+    """The LLM and the response get the question without the padding a client may send."""
+    body = client.post("/ask", json={"question": f"  {QUESTION}\n"}).json()
+    assert body["question"] == QUESTION
+    assert fake_llm.questions == [QUESTION]
 
 
 def test_ask_returns_rows(client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner) -> None:

@@ -9,7 +9,7 @@ no writer → template; writer raises `LLMError` → template; text empty or > 6
 ## Check 1 — every number exists (`grounding.find_unsupported_numbers`)
 
 - `numbers_in_text` extracts digit runs with `.`/`,` separators; `interpretations()` returns **every** plausible value under Spanish and English notation (`"1.138"` → {1138, 1.138}); a token passes if any reading matches.
-- `allowed_numbers(rows, question, sql, row_count)`: all cell values (digits inside strings and dates too), numbers in the question and the executed SQL (e.g. `month = 3`, `LIMIT 3`), and `0..row_count` (counts/enumerations).
+- `allowed_numbers(rows, question, sql, row_count)`: all cell values (digits inside strings and dates too), numbers in the question and the executed SQL (e.g. `month = 3`, `LIMIT 3`), `row_count` itself, and `0..min(row_count, MAX_ENUMERATION)` (small counts, list positions). The cap (20) matters: with plain `0..row_count`, a 300-row result accepted any invented figure up to 300.
 - Matching tolerates roundings to 0, 1 and 2 decimals and ignores sign.
 
 ## Check 2 — numbers next to the right row (`grounding.find_misattributed_numbers`)
@@ -29,3 +29,9 @@ Deterministic Spanish text by result shape (0 rows / single value / single row /
 ## Known gaps
 
 The checks guarantee real, correctly attributed numbers, but not completeness (mentioning 1 of 6 countries passes) and not number formatting. List/ranking questions frequently fall back to the template with the 1.5B model.
+
+Check 1 is "the number appears somewhere the answer may quote from", so these still pass (found in the audit, not fixed):
+
+- numbers from the **question** or the **SQL** used as if they were results: the validator's own `LIMIT 1000` makes "1000" always allowed, and "¿vendimos más de 5000?" allows "5000";
+- digits inside **text cells**: an `order_id` like `ORD-000250` allows "250";
+- numbers written as **words** ("tres mil", "el doble") are not seen at all, and the sign is ignored (`-5` matches `5`).

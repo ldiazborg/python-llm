@@ -19,7 +19,7 @@
 - `SCHEMA_DESCRIPTION` is compact pseudo-DDL built from `domain` (statuses, countries) — keep it in sync with `sql/`.
 - Few-shot examples are sent as real user/assistant turns; each teaches one pattern (view filter, ranking view, GROUP BY, year filter, refusal).
 - Sentinel `CANNOT_ANSWER` → `UnanswerableQuestionError` (HTTP 422). The 1.5B model does not always obey it, which is why the validator has `require_data_source`.
-- `extract_sql` strips ``` fences, chatter around them, whitespace and trailing `;`.
+- `extract_sql` strips ``` fences (tagged `sql`, `postgresql`, `postgres`, `pgsql` or untagged), chatter around them, whitespace and trailing `;`.
 
 ## Answer prompt (`llm/answer.py`)
 

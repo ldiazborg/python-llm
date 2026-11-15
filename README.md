@@ -5,7 +5,7 @@ Proyecto en Python que:
 1. **Carga**: genera un CSV de pedidos con errores intencionados (Faker), lo limpia y lo guarda en **PostgreSQL**.
 2. **Modelos**: dos vistas SQL, ventas por mes y país, y los 10 clientes que más compran.
 3. **API (FastAPI)**: recibe una pregunta en lenguaje natural, un **LLM local (vLLM en Docker)** la convierte en SQL, la consulta se **valida** (solo lectura, solo tablas permitidas) y se devuelve el resultado, **redactado también en lenguaje natural** (con cada cifra comprobada contra los datos), o un error claro.
-4. **Tests** con pytest: 246 tests unitarios (sin Docker) y 13 de integración contra PostgreSQL real.
+4. **Tests** con pytest: 254 tests unitarios (sin Docker) y 13 de integración contra PostgreSQL real.
 
 ```text
 "¿Cuánto vendimos en España en marzo?"
@@ -268,7 +268,7 @@ SELECT * FROM analytics.v_top_customers LIMIT 3;
 
 | Campo            | Tipo           | Por defecto | Descripción                                                                      |
 | ---------------- | -------------- | ----------- | -------------------------------------------------------------------------------- |
-| `question`       | string (3–500) | —           | La pregunta                                                                      |
+| `question`       | string (3–500) | —           | La pregunta (se ignoran los espacios al principio y al final)                    |
 | `natural_answer` | bool           | `true`      | Redactar también la respuesta (una segunda llamada al LLM); `false` = solo datos |
 
 
@@ -388,7 +388,7 @@ Los 52 casos de ataque de `tests/test_validator.py` se rechazan cada uno por el 
 
 Tras ejecutar la consulta, el mismo LLM redacta la respuesta en una o dos frases a partir de la pregunta, la SQL y las filas (máximo `ANSWER_MAX_ROWS`). La frase **solo se devuelve si pasa dos comprobaciones**; si no, se usa una plantilla determinista:
 
-1. **Cada número existe en los datos**: en las filas, en la pregunta o en la SQL. Se aceptan el formato español e inglés (`6.215,32` / `6,215.32`) y los redondeos (`unos 6.215 €`). Detecta cifras inventadas, alteradas (`6.512,32`) o calculadas (porcentajes, totales).
+1. **Cada número existe en los datos**: en las filas, en la pregunta o en la SQL. Se aceptan el formato español e inglés (`6.215,32` / `6,215.32`) y los redondeos (`unos 6.215 €`). Detecta cifras inventadas, alteradas (`6.512,32`) o calculadas (porcentajes, totales). También se aceptan el número de filas del resultado y los enteros pequeños de una enumeración (`1.`, `2.`… hasta 20 como máximo).
 2. **Cada número está junto a la fila correcta**: una cifra escrita tras un nombre ("Chile … 8") debe pertenecer a la fila de ese nombre, y un marcador de lista ("1. Albano…") debe ser el ranking o la posición real de esa fila. Detecta rankings invertidos.
 
 
@@ -405,7 +405,7 @@ Los motivos de cada frase descartada quedan en el log del servidor (`Discarded L
 ## Tests
 
 ```bash
-uv run pytest                                   # 246 tests unitarios: sin Docker; LLM y BD simulados
+uv run pytest                                   # 254 tests unitarios: sin Docker; LLM y BD simulados
 
 docker compose up -d postgres                   # integración: PostgreSQL real
 RUN_INTEGRATION=1 uv run pytest -m integration  # 13 tests (vacían y recargan analytics.orders)
@@ -421,10 +421,10 @@ En PowerShell: `$env:RUN_INTEGRATION = "1"; uv run pytest -m integration`. Los t
 | `test_parsers.py`              | 32    | Formatos de fecha e importe aceptados y rechazados, normalización de texto         |
 | `test_clean.py`                | 10    | Duplicados, fechas, importes, estados, grafías de clientes, generador → limpieza   |
 | `test_validator.py`            | 93    | 19 consultas válidas, 52 ataques, límites, ámbito de los CTE, reglas personalizadas |
-| `test_llm.py`                  | 15    | Clientes LLM con la capa HTTP simulada: errores, `CANNOT_ANSWER`, prompts          |
-| `test_answers.py`              | 46    | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas |
+| `test_llm.py`                  | 18    | Clientes LLM con la capa HTTP simulada: errores, `CANNOT_ANSWER`, prompts          |
+| `test_answers.py`              | 47    | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas |
 | `test_db.py`                   | 25    | Conversión de valores a JSON, columnas repetidas, traducción de errores de la BD   |
-| `test_api.py`                  | 19    | Endpoint con LLM y BD simulados: éxito, cada código de error, respuesta redactada  |
+| `test_api.py`                  | 23    | Endpoint con LLM y BD simulados: éxito, cada código de error, respuesta redactada  |
 | `integration/test_postgres.py` | 13    | Carga real, idempotencia, vistas, permisos del rol, timeout, columnas repetidas    |
 
 
