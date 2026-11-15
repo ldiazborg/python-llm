@@ -28,7 +28,8 @@ services:
       - --api-key=${LLM_API_KEY}
       - --dtype=half
       - --max-model-len=${VLLM_MAX_MODEL_LEN:-2048}
-      - --gpu-memory-utilization=${VLLM_GPU_MEM_UTIL:-0.90}
+      # 0.80 is the measured maximum for a 4 GB GPU under WSL2 (see .env.example).
+      - --gpu-memory-utilization=${VLLM_GPU_MEM_UTIL:-0.80}
       # Small-GPU settings: no CUDA graphs (saves VRAM), few concurrent sequences.
       - --enforce-eager
       - --max-num-seqs=4
