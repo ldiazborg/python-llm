@@ -43,3 +43,5 @@ Result shaping in the runner (`db.py`):
 ## Local port
 
 A native Windows PostgreSQL may already own 5432; then set `POSTGRES_PORT=5433` in `.env` (both compose and the app read it).
+
+Compose publishes PostgreSQL (and vLLM) on `127.0.0.1` only. Keep the `127.0.0.1:` prefix in `ports:` — without it Docker binds every interface and the database is reachable from the LAN with whatever password is in `.env`.
