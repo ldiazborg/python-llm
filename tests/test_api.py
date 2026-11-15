@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import FakeQueryRunner, FakeSQLGenerator
+from conftest import FakeAnswerWriter, FakeQueryRunner, FakeSQLGenerator
 from orders_nl.db import QueryResult
 from orders_nl.errors import (
     InvalidQueryError,
@@ -120,3 +120,70 @@ def test_ask_database_errors(
     assert body["detail"] == str(error)
     if code == "invalid_query":
         assert body["sql"] == fake_db.executed[0]  # the SQL the database rejected
+
+
+# --- natural-language answer --------------------------------------------------------
+
+SALES_SQL = (
+    "SELECT SUM(total_amount) AS total_sales FROM v_sales_by_month_country "
+    "WHERE country = 'España' AND month = 3"
+)
+SALES_RESULT = QueryResult(columns=["total_sales"], rows=[{"total_sales": 6215.32}])
+
+
+def test_ask_returns_grounded_llm_answer(
+    client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner, fake_writer: FakeAnswerWriter
+) -> None:
+    fake_llm.sql = SALES_SQL
+    fake_db.result = SALES_RESULT
+    fake_writer.text = "En marzo se vendieron 6.215,32 € en España."
+
+    body = client.post("/ask", json={"question": QUESTION}).json()
+
+    assert body["answer"] == "En marzo se vendieron 6.215,32 € en España."
+    assert body["answer_source"] == "llm"
+    assert body["rows"] == [{"total_sales": 6215.32}]  # data is still returned
+    question, sql, result = fake_writer.calls[0]
+    assert (question, sql, result) == (QUESTION, body["sql"], SALES_RESULT)
+
+
+def test_ask_replaces_invented_numbers_with_template(
+    client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner, fake_writer: FakeAnswerWriter
+) -> None:
+    fake_llm.sql = SALES_SQL
+    fake_db.result = SALES_RESULT
+    fake_writer.text = "En marzo se vendieron 6.512,32 € en España."  # digits swapped
+
+    body = client.post("/ask", json={"question": QUESTION}).json()
+
+    assert body["answer_source"] == "template"
+    assert body["answer"] == "El resultado es 6.215,32 (total_sales)."
+
+
+def test_ask_answer_writer_failure_still_returns_data(
+    client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner, fake_writer: FakeAnswerWriter
+) -> None:
+    """A failed sentence must not turn a successful query into an error."""
+    fake_llm.sql = SALES_SQL
+    fake_db.result = SALES_RESULT
+    fake_writer.error = LLMError("The language model is unavailable (APITimeoutError)")
+
+    resp = client.post("/ask", json={"question": QUESTION})
+
+    assert resp.status_code == 200
+    assert resp.json()["answer_source"] == "template"
+    assert resp.json()["rows"] == [{"total_sales": 6215.32}]
+
+
+def test_ask_without_natural_answer_skips_the_extra_llm_call(
+    client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner, fake_writer: FakeAnswerWriter
+) -> None:
+    fake_llm.sql = SALES_SQL
+    fake_db.result = SALES_RESULT
+
+    body = client.post("/ask", json={"question": QUESTION, "natural_answer": False}).json()
+
+    assert body["answer"] is None
+    assert body["answer_source"] is None
+    assert body["rows"] == [{"total_sales": 6215.32}]
+    assert fake_writer.calls == []

@@ -4,8 +4,8 @@ Proyecto en Python que:
 
 1. **Carga**: genera un CSV de pedidos con errores intencionados (Faker), lo limpia y lo guarda en **PostgreSQL**.
 2. **Modelos**: dos vistas SQL, ventas por mes y país, y los 10 clientes que más compran.
-3. **API (FastAPI)**: recibe una pregunta en lenguaje natural, un **LLM local (vLLM en Docker)** la convierte en SQL, la consulta se **valida** (solo lectura, solo tablas permitidas) y se devuelve el resultado o un error claro.
-4. **Tests** con pytest: generación, limpieza, validación, cliente LLM y endpoint con LLM simulado, más tests de integración opcionales contra Postgres.
+3. **API (FastAPI)**: recibe una pregunta en lenguaje natural, un **LLM local (vLLM en Docker)** la convierte en SQL, la consulta se **valida** (solo lectura, solo tablas permitidas) y se devuelve el resultado, **redactado también en lenguaje natural** (con cada cifra comprobada contra los datos), o un error claro.
+4. **Tests** con pytest: generación, limpieza, validación, cliente LLM, respuestas en lenguaje natural y endpoint con LLM simulado, más tests de integración opcionales contra Postgres.
 
 ## Requisitos
 
@@ -50,12 +50,25 @@ Respuesta:
 ```json
 {
   "question": "¿Cuánto vendimos en España en marzo?",
+  "answer": "Vendimos 6.215,32 euros en España en marzo.",
+  "answer_source": "llm",
   "sql": "SELECT SUM(total_amount) AS total_sales FROM v_sales_by_month_country WHERE country = 'España' AND month = 3 LIMIT 1000",
   "columns": ["total_sales"],
   "rows": [{"total_sales": 6215.32}],
   "row_count": 1
 }
 ```
+
+Para obtener solo los datos (sin la segunda llamada al LLM): `{"question": "...", "natural_answer": false}` → `answer` y `answer_source` vienen a `null`.
+
+### Respuesta en lenguaje natural
+
+Tras ejecutar la consulta, el mismo LLM redacta la respuesta en una o dos frases a partir de la pregunta, la SQL y las filas (máximo `ANSWER_MAX_ROWS`, 20 por defecto). Esa frase **solo se devuelve si pasa dos comprobaciones**; si no, se usa una plantilla determinista:
+
+1. **Cada número existe en los datos** (en las filas, la pregunta o la SQL; se aceptan formato español/inglés y redondeos). Detecta cifras inventadas, alteradas o calculadas (porcentajes, totales).
+2. **Cada número está junto a la fila correcta**: una cifra escrita tras un nombre ("Chile … 8") debe pertenecer a la fila de ese nombre, y un marcador de lista ("1. Albano…") debe ser el ranking o la posición real de esa fila. Detecta rankings invertidos, que el modelo de 1.5B produce con frecuencia.
+
+`answer_source` indica el origen: `"llm"` (frase del modelo, verificada) o `"template"` (texto determinista, p. ej. *"Se encontraron 3 resultados: Albano Llopis Hierro (customer_rank 1, total_amount 38.655,46); …"*). Si el LLM falla al redactar, la petición **no** falla: se devuelven los datos con la plantilla.
 
 ### Errores
 
@@ -99,8 +112,10 @@ src/orders_nl/
   sql/schema.sql, sql/views.sql  tabla y modelos
   validator.py                   validación de SQL sobre el AST de sqlglot, con reglas enchufables
   llm/prompt.py, llm/client.py   prompt (esquema + few-shot) y cliente OpenAI-compatible
+  llm/answer.py                  redacción de la respuesta en lenguaje natural (prompt + cliente)
+  answers/                       respuesta fiable: comprobación de cifras, plantillas y selección
   db.py                          carga (admin) y ejecución de solo lectura (API)
-  service.py                     pregunta -> SQL -> validación -> ejecución (sin HTTP)
+  service.py                     pregunta -> SQL -> validación -> ejecución -> respuesta (sin HTTP)
   api/                           FastAPI: rutas, esquemas y mapeo de errores a HTTP
 tests/                           unitarios + integration/ (opcionales)
 ```
@@ -113,6 +128,7 @@ tests/                           unitarios + integration/ (opcionales)
 - **Nueva regla de validación**: una función `(tree, policy) -> None` pasada en `SqlValidator(rules=...)`.
 - **Otro LLM**: cambiar `LLM_BASE_URL` / `LLM_MODEL` (cualquier servidor OpenAI-compatible) o implementar el protocolo `SQLGenerator`.
 - **Nuevo error de la API**: excepción en `errors.py` + una entrada en `api/errors.ERROR_MAP`.
+- **Otra forma de redactar respuestas**: implementar el protocolo `AnswerWriter` (`write_answer(question, sql, result)`); `AnswerComposer` le aplica las mismas comprobaciones. Con `AnswerComposer(None)` solo se usan plantillas.
 
 ## Decisiones
 
@@ -137,6 +153,7 @@ tests/                           unitarios + integration/ (opcionales)
 - vLLM con cliente OpenAI-compatible: la aplicación no depende del proveedor.
 - `Qwen2.5-Coder-1.5B-Instruct` en fp16 para caber en 4 GB de VRAM (`--enforce-eager`, `--max-model-len 2048`). Al ser pequeño, el prompt lleva el esquema, las reglas de negocio y ejemplos few-shot, y `temperature=0`.
 - El cliente OpenAI se inyecta, de modo que los tests simulan la capa HTTP sin servidor.
+- **Respuesta en lenguaje natural híbrida**: el LLM redacta, pero solo se acepta si cada cifra existe en los datos y está junto a la fila correcta; si no, plantilla determinista. Un fallo al redactar nunca convierte una consulta correcta en un error. Se mantienen `sql` y `rows` en la respuesta para poder verificarla.
 
 **Código**
 - `QueryService` no depende de FastAPI; la API solo traduce HTTP y errores.
@@ -144,7 +161,8 @@ tests/                           unitarios + integration/ (opcionales)
 
 ## Qué haría con más tiempo
 
-- Evaluación del text-to-SQL: un conjunto de preguntas con su resultado esperado para medir la precisión del modelo y comparar prompts/modelos.
+- Evaluación del text-to-SQL y de las respuestas redactadas: un conjunto de preguntas con su resultado esperado para medir la precisión del modelo, la tasa de respuestas descartadas y comparar prompts/modelos.
+- Detectar respuestas **incompletas** (p. ej. mencionar solo 1 de 6 países) y normalizar el formato de los números a la convención española en la frase del LLM.
 - Reintento guiado: si la SQL es rechazada, devolver el motivo al LLM y pedir una corrección (1 intento).
 - Incluir en el prompt valores reales de la BD (rango de fechas, productos) y la fecha actual para resolver "el mes pasado".
 - Pool de conexiones (`psycopg_pool`) y cliente LLM compartido en lugar de crearlos por petición.
@@ -159,7 +177,7 @@ tests/                           unitarios + integration/ (opcionales)
 - **Qué le pedí**: a Claude Code (asistente de programación) le pedí primero el andamiaje del proyecto a partir del enunciado, preguntándome antes de elegir cada herramienta (runtime del LLM, base de datos, librerías, gestor de dependencias). Después, la implementación completa con Faker para los datos, código comentado, diseño modular y una rama de git por funcionalidad.
 - **Qué acepté**: la estructura por capas (generación → limpieza → carga → validación → servicio → API), la validación sobre el AST con sqlglot más el rol de solo lectura como segunda barrera, y el mapeo de errores a códigos HTTP.
 - **Qué corregí / decidí yo**: elegí vLLM, PostgreSQL, pandas + sqlglot y uv; ajusté el modelo a mi GPU de 4 GB (Qwen2.5-Coder-1.5B en fp16 en lugar de uno de 7B); pedí Faker para generar los datos. TODO: añadir lo que hayas revisado o cambiado tras leer el código.
-- **Lo que se detectó y corrigió durante el desarrollo**: `text()` de SQLAlchemy interpretaba los casts `::date` como parámetros (se ejecutan los scripts con el cursor de psycopg); `date.fromisoformat` acepta `20250315` en Python 3.11+ (el test de fechas ISO se hizo estricto); los mensajes de error de sqlglot incluían detalles internos (se limpian antes de devolverlos).
+- **Lo que se detectó y corrigió durante el desarrollo**: probando con el modelo real, respondía "¿Qué tiempo hace en Madrid?" con `SELECT CURRENT_TIMESTAMP` (se añadió la regla "al menos una tabla permitida") y redactaba rankings invertidos con cifras reales (se añadió la comprobación de atribución); `text()` de SQLAlchemy interpretaba los casts `::date` como parámetros (se ejecutan los scripts con el cursor de psycopg); `date.fromisoformat` acepta `20250315` en Python 3.11+ (el test de fechas ISO se hizo estricto); los mensajes de error de sqlglot incluían detalles internos (se limpian antes de devolverlos).
 
 ## Problemas conocidos
 
@@ -170,3 +188,4 @@ tests/                           unitarios + integration/ (opcionales)
   - El primer arranque descarga el modelo (~3 GB) y tarda varios minutos; los siguientes usan la caché del volumen `hf-cache`.
 - vLLM escribe `LLM_API_KEY` en su log de arranque (`non-default args`): no compartas esos logs.
 - Un modelo de 1.5B se equivoca en preguntas complejas; el validador y los errores claros evitan que eso llegue a ejecutarse o se devuelva como un resultado engañoso.
+- Respuestas en lenguaje natural: las comprobaciones garantizan que las cifras son reales y están bien atribuidas, pero **no que la frase sea completa** (con resultados de varias filas el modelo a veces menciona solo algunas; las filas completas siempre van en `rows`). Algunas cifras salen en formato inglés (`3386.21 €`). En listas y rankings el modelo de 1.5B suele desordenar los nombres, así que esas preguntas acaban a menudo en la plantilla.

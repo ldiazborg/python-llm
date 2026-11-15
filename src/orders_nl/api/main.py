@@ -13,11 +13,12 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI
 
+from orders_nl.answers import AnswerComposer
 from orders_nl.api.errors import ERROR_MAP, register_error_handlers
 from orders_nl.api.schemas import AskRequest, AskResponse, ErrorResponse
 from orders_nl.config import ALLOWED_TABLES, DB_SCHEMA, Settings, get_settings
 from orders_nl.db import QueryRunner, make_readonly_runner
-from orders_nl.llm import OpenAICompatibleSQLGenerator, SQLGenerator
+from orders_nl.llm import AnswerWriter, OpenAICompatibleAnswerWriter, OpenAICompatibleSQLGenerator, SQLGenerator
 from orders_nl.service import QueryService
 from orders_nl.validator import QueryPolicy, SqlValidator
 
@@ -39,12 +40,21 @@ def get_validator(settings: Annotated[Settings, Depends(get_settings)]) -> SqlVa
     return SqlValidator(policy)
 
 
+def get_answer_writer(settings: Annotated[Settings, Depends(get_settings)]) -> AnswerWriter:
+    return OpenAICompatibleAnswerWriter.from_settings(settings)
+
+
+def get_answer_composer(writer: Annotated[AnswerWriter, Depends(get_answer_writer)]) -> AnswerComposer:
+    return AnswerComposer(writer)
+
+
 def get_query_service(
     generator: Annotated[SQLGenerator, Depends(get_sql_generator)],
     validator: Annotated[SqlValidator, Depends(get_validator)],
     runner: Annotated[QueryRunner, Depends(get_query_runner)],
+    composer: Annotated[AnswerComposer, Depends(get_answer_composer)],
 ) -> QueryService:
-    return QueryService(generator, validator, runner)
+    return QueryService(generator, validator, runner, composer)
 
 
 # --- app -----------------------------------------------------------------------------
@@ -76,14 +86,18 @@ def create_app() -> FastAPI:
 
     @app.post("/ask", response_model=AskResponse, responses=error_responses)  # type: ignore[arg-type]
     def ask(req: AskRequest, service: Annotated[QueryService, Depends(get_query_service)]) -> AskResponse:
-        """Natural-language question -> LLM SQL -> validation -> read-only execution.
+        """Natural-language question -> LLM SQL -> validation -> read-only execution
+        -> (optional) natural-language answer.
 
         Sync endpoint on purpose: the LLM and DB clients are blocking, and FastAPI
         runs sync endpoints in a thread pool so they don't block the event loop.
         """
-        answer = service.ask(req.question)
+        answer = service.ask(req.question, natural_answer=req.natural_answer)
+        natural = answer.natural
         return AskResponse(
             question=answer.question,
+            answer=natural.text if natural else None,
+            answer_source=natural.source if natural else None,
             sql=answer.sql,
             columns=answer.columns,
             rows=answer.rows,
