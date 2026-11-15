@@ -9,7 +9,7 @@ Commands are in [commands.md](commands.md#tests). Unit tests need no Docker, no 
 | `test_generate.py` | size, seed reproducibility, each defect really injected, composable defects |
 | `test_parsers.py` | accepted/rejected date and amount formats, text folding |
 | `test_clean.py` | hand-made dirty rows + generator→cleaner end-to-end invariants |
-| `test_validator.py` | `VALID` / `INVALID` lists (36 attacks), LIMIT handling, custom rules |
+| `test_validator.py` | `VALID` / `INVALID` lists (52 attacks), LIMIT handling, CTE scoping, custom rules |
 | `test_llm.py` | both LLM clients over a mocked HTTP transport, prompt contents, `extract_sql` |
 | `test_answers.py` | number grounding/attribution (with real model outputs), templates, composer |
 | `test_api.py` | endpoint with all collaborators faked: success, every error code, natural answers |

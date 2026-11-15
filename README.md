@@ -5,7 +5,7 @@ Proyecto en Python que:
 1. **Carga**: genera un CSV de pedidos con errores intencionados (Faker), lo limpia y lo guarda en **PostgreSQL**.
 2. **Modelos**: dos vistas SQL, ventas por mes y país, y los 10 clientes que más compran.
 3. **API (FastAPI)**: recibe una pregunta en lenguaje natural, un **LLM local (vLLM en Docker)** la convierte en SQL, la consulta se **valida** (solo lectura, solo tablas permitidas) y se devuelve el resultado, **redactado también en lenguaje natural** (con cada cifra comprobada contra los datos), o un error claro.
-4. **Tests** con pytest: 182 tests unitarios (sin Docker) y 9 de integración contra PostgreSQL real.
+4. **Tests** con pytest: 217 tests unitarios (sin Docker) y 9 de integración contra PostgreSQL real.
 
 ```text
 "¿Cuánto vendimos en España en marzo?"
@@ -369,11 +369,15 @@ La SQL generada por el LLM se trata como **entrada no confiable**. Hay dos barre
 | Sin efectos secundarios en ningún nodo         | `WITH x AS (DELETE …) SELECT …`, `SELECT … INTO t`, `FOR UPDATE` | `Forbidden operation in query: DELETE`                |
 | Solo tablas permitidas del esquema `analytics` | `pg_catalog.pg_user`, `public.orders`, `customers`               | `Table 'customers' is not allowed. Allowed: …`        |
 | Leer al menos una tabla permitida              | `SELECT CURRENT_TIMESTAMP`                                       | `The query does not read any data table; …`           |
-| Sin funciones de sistema                       | `pg_sleep(10)`, `pg_read_file(…)`, `set_config(…)`               | `Function 'pg_sleep' is not allowed`                  |
+| Sin funciones de sistema                       | `pg_sleep(10)`, `pg_read_file(…)`, `set_config(…)`, `version()`  | `Function 'pg_sleep' is not allowed`                  |
 | `LIMIT` máximo                                 | `SELECT * FROM orders`                                           | *(no rechaza: añade `LIMIT 1000` o reduce uno mayor)* |
 
 
-Los 36 casos de ataque de `tests/test_validator.py` se rechazan cada uno por el motivo esperado.
+Los 52 casos de ataque de `tests/test_validator.py` se rechazan cada uno por el motivo esperado. Tres detalles que una comprobación ingenua pasa por alto:
+
+- **Un CTE no oculta una tabla real fuera de su ámbito.** `WITH pg_roles AS (SELECT * FROM pg_roles) SELECT … FROM pg_roles, orders` lee el catálogo dentro del cuerpo del CTE (un CTE no se ve a sí mismo salvo con `RECURSIVE`); el validador resuelve cada nombre con las reglas de visibilidad de PostgreSQL.
+- **Los nombres se comparan como los lee PostgreSQL**: sin comillas se pasan a minúsculas (`FROM ORDERS` es la tabla permitida) y entre comillas se respetan (`"ORDERS"` es otra relación).
+- **Funciones que reciben SQL o un nombre de tabla como texto** (`query_to_xml…`, `table_to_xml…`, `ts_stat`) se rechazan, porque leerían tablas que el validador no ve. Lo mismo `FETCH FIRST n ROWS WITH TIES`, que puede devolver más de `n` filas: se sustituye por `LIMIT 1000`.
 
 **2. Base de datos**: la API se conecta con un rol que **solo** tiene `SELECT` sobre `analytics`, con `default_transaction_read_only = on`, `statement_timeout = 5s` y `search_path = analytics`. Además, cada sesión se abre en modo read-only. Aunque el validador tuviera un fallo, la API no podría escribir datos ni bloquear la base de datos.
 
@@ -398,7 +402,7 @@ Los motivos de cada frase descartada quedan en el log del servidor (`Discarded L
 ## Tests
 
 ```bash
-uv run pytest                                   # 182 tests unitarios: sin Docker; LLM y BD simulados
+uv run pytest                                   # 217 tests unitarios: sin Docker; LLM y BD simulados
 
 docker compose up -d postgres                   # integración: PostgreSQL real
 RUN_INTEGRATION=1 uv run pytest -m integration  # 9 tests (vacían y recargan analytics.orders)
@@ -413,7 +417,7 @@ En PowerShell: `$env:RUN_INTEGRATION = "1"; uv run pytest -m integration`. Los t
 | `test_generate.py`             | 6     | Tamaño, reproducibilidad, cada defecto aparece, defectos componibles               |
 | `test_parsers.py`              | 32    | Formatos de fecha e importe aceptados y rechazados, normalización de texto         |
 | `test_clean.py`                | 8     | Duplicados, fechas, importes, estados, pasos personalizados, generador → limpieza  |
-| `test_validator.py`            | 58    | 11 consultas válidas, 36 ataques, límites, mensajes, reglas personalizadas         |
+| `test_validator.py`            | 93    | 19 consultas válidas, 52 ataques, límites, ámbito de los CTE, reglas personalizadas |
 | `test_llm.py`                  | 15    | Clientes LLM con la capa HTTP simulada: errores, `CANNOT_ANSWER`, prompts          |
 | `test_answers.py`              | 44    | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas |
 | `test_api.py`                  | 19    | Endpoint con LLM y BD simulados: éxito, cada código de error, respuesta redactada  |
