@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from orders_nl.etl.clean import CleaningReport, clean_orders
+from orders_nl.etl.parsers import fold
 from orders_nl.domain import COLUMNS, KNOWN_COUNTRIES, OrderStatus
 from orders_nl.generation import GeneratorConfig, generate_orders
 
@@ -60,6 +61,28 @@ def test_repairs_comma_decimal_amounts() -> None:
     assert report.amounts_repaired == 1
 
 
+def _orders_for(customers: list[str]) -> pd.DataFrame:
+    """One valid order per customer name, so only the customer column varies."""
+    rows = [[f"D{i}", "2025-01-02", name, "Chile", "Ratón", "10", "completed"] for i, name in enumerate(customers)]
+    return pd.DataFrame(rows, columns=list(COLUMNS))
+
+
+def test_unifies_customer_spellings() -> None:
+    """Regression: case/accent variants of a name were kept as different customers."""
+    raw = _orders_for(["Ana López", "Ana López", "ANA LÓPEZ", "ana lopez", "  Ana   López ", "Eva Ruiz", "JUAN GIL"])
+    clean, report = clean_orders(raw)
+    # The most frequent spelling wins; the other customers are untouched, and a
+    # name only ever seen in capitals stays as written (nothing better is known).
+    assert list(clean["customer"]) == ["Ana López"] * 5 + ["Eva Ruiz", "JUAN GIL"]
+    assert report.text_values_normalized == 3  # the two variants + the padded one
+
+
+def test_customer_spelling_ties_prefer_mixed_case_with_accents() -> None:
+    """With one row each, the properly written name beats capitals and missing accents."""
+    clean, _ = clean_orders(_orders_for(["MARÍA RUIZ", "Maria Ruiz", "María Ruiz", "maría ruiz"]))
+    assert set(clean["customer"]) == {"María Ruiz"}
+
+
 def test_drops_unknown_status() -> None:
     """A status outside OrderStatus drops the row and is counted."""
     raw = pd.DataFrame([["C1", "2025-01-02", "Ana", "Chile", "Ratón", "10", "lost"]], columns=list(COLUMNS))
@@ -94,6 +117,8 @@ def test_cleans_generated_dataset_end_to_end() -> None:
     assert clean["order_id"].is_unique
     assert all(isinstance(d, date) for d in clean["order_date"])
     assert set(clean["country"]) <= set(KNOWN_COUNTRIES)
+    # One spelling per customer: no two names that differ only in case or accents.
+    assert clean["customer"].map(fold).nunique() == clean["customer"].nunique()
     assert set(clean["status"]) <= {s.value for s in OrderStatus}
     assert (clean["amount"] >= 0).all()
     assert report.duplicates_removed == len(raw) - 1000  # every injected copy found

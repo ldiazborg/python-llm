@@ -11,6 +11,9 @@ Cleaning decisions (also in the README):
     invent sales, and the row count lost is small and reported
   - country spellings are mapped to canonical names; statuses are lower-cased
     and rows with an unknown status are dropped (the DB enforces the set)
+  - customer names that differ only in case or accents are one customer and
+    get one spelling, the most frequent one (there is no customer id, so the
+    name is the identity that "top customers" groups by)
 
 Adding a step, e.g. dropping future dates:
 
@@ -24,6 +27,7 @@ Steps that parse values (dates, amounts) do the per-value work with the pure
 functions in `parsers.py`; this module only applies them to whole columns.
 """
 
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -31,7 +35,7 @@ from datetime import date
 import pandas as pd
 
 from orders_nl.domain import COLUMNS, KNOWN_COUNTRIES, OrderStatus
-from orders_nl.etl.parsers import build_canonicalizer, normalize_spaces, parse_amount, parse_date
+from orders_nl.etl.parsers import build_canonicalizer, fold, normalize_spaces, parse_amount, parse_date
 
 
 @dataclass
@@ -83,6 +87,51 @@ def normalize_text(df: pd.DataFrame, report: CleaningReport) -> pd.DataFrame:
         # Count changed cells (element-wise comparison, then sum of True values).
         report.text_values_normalized += int((before != out[column]).sum())
     return out
+
+
+def _spelling_rank(spelling: str, count: int) -> tuple[int, bool, int, str]:
+    """Sort key for choosing between spellings of one name: the larger, the better.
+
+    Compared field by field, so each one only breaks ties left by the previous:
+        1. rows using it       dirty variants are the exception, the real name the rule
+        2. mixed case          "Ana López" over "ANA LÓPEZ" / "ana lópez"
+        3. non-ASCII letters   "López" over "Lopez": an accent is never added by mistake
+        4. the text itself     arbitrary but deterministic: same input, same output
+    """
+    return (
+        count,
+        not (spelling.isupper() or spelling.islower()),
+        sum(1 for ch in spelling if not ch.isascii()),
+        spelling,
+    )
+
+
+def unify_customer_spellings(df: pd.DataFrame, report: CleaningReport) -> pd.DataFrame:
+    """Give every customer one spelling: "ANA LÓPEZ" and "ana lopez" become "Ana López".
+
+    Countries can be mapped to a known list; customers can't, so the canonical
+    spelling is learned from the data: names equal under `fold` (case and
+    accents ignored) are the same customer, written the way most of their rows
+    write it. Without this, each variant counts as a different customer and
+    `v_top_customers` splits one buyer's sales across several names.
+
+    A name seen in a single spelling is left as it is (nothing better is
+    known), and two different people whose names differ only in case/accents
+    would be merged: the data has no customer id to tell them apart.
+    """
+    # How many rows use each exact spelling.
+    counts = Counter(df["customer"])
+    # fold key -> best spelling seen so far for that customer.
+    best: dict[str, str] = {}
+    for spelling, count in counts.items():
+        key = fold(spelling)
+        if key not in best or _spelling_rank(spelling, count) > _spelling_rank(best[key], counts[best[key]]):
+            best[key] = spelling
+
+    unified = df["customer"].map(lambda name: best[fold(name)])
+    report.text_values_normalized += int((unified != df["customer"]).sum())
+    # assign(): a new DataFrame, the caller's is left untouched.
+    return df.assign(customer=unified)
 
 
 def drop_exact_duplicates(df: pd.DataFrame, report: CleaningReport) -> pd.DataFrame:
@@ -138,9 +187,11 @@ def drop_duplicate_ids(df: pd.DataFrame, report: CleaningReport) -> pd.DataFrame
 
 
 # Order matters: normalize before de-duplicating so " España" and "España"
-# copies collapse; parse before the id check so it only sees loadable rows.
+# copies collapse; unify customers after the whitespace cleanup they rely on;
+# parse before the id check so it only sees loadable rows.
 DEFAULT_STEPS: tuple[CleaningStep, ...] = (
     normalize_text,
+    unify_customer_spellings,
     drop_exact_duplicates,
     parse_dates,
     parse_amounts,

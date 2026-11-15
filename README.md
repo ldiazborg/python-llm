@@ -5,7 +5,7 @@ Proyecto en Python que:
 1. **Carga**: genera un CSV de pedidos con errores intencionados (Faker), lo limpia y lo guarda en **PostgreSQL**.
 2. **Modelos**: dos vistas SQL, ventas por mes y país, y los 10 clientes que más compran.
 3. **API (FastAPI)**: recibe una pregunta en lenguaje natural, un **LLM local (vLLM en Docker)** la convierte en SQL, la consulta se **valida** (solo lectura, solo tablas permitidas) y se devuelve el resultado, **redactado también en lenguaje natural** (con cada cifra comprobada contra los datos), o un error claro.
-4. **Tests** con pytest: 244 tests unitarios (sin Docker) y 13 de integración contra PostgreSQL real.
+4. **Tests** con pytest: 246 tests unitarios (sin Docker) y 13 de integración contra PostgreSQL real.
 
 ```text
 "¿Cuánto vendimos en España en marzo?"
@@ -109,7 +109,7 @@ uv run orders-generate --rows 1200 --seed 42
 uv run orders-load --csv data/orders_raw.csv
 #     rows_in                        1236
 #     duplicates_removed             36
-#     text_values_normalized         106
+#     text_values_normalized         128
 #     dates_repaired                 58
 #     amounts_repaired               35
 #     rows_dropped_bad_date          14
@@ -188,6 +188,7 @@ Un *pipeline* de pasos independientes (`etl/clean.py`); cada uno corrige un tipo
 | Paso                    | Qué hace                                                                                                  |
 | ----------------------- | --------------------------------------------------------------------------------------------------------- |
 | `normalize_text`        | Recorta espacios, unifica países (`ESPANA`, `españa` → `España`) y pasa los estados a minúsculas          |
+| `unify_customer_spellings` | Un cliente, una grafía: `ANA LÓPEZ` y `ana lopez` pasan a `Ana López` (la más frecuente en los datos)  |
 | `drop_exact_duplicates` | Elimina filas idénticas (tras normalizar el texto)                                                        |
 | `parse_dates`           | Acepta 8 formatos (día primero); descarta las fechas imposibles o vacías                                  |
 | `parse_amounts`         | Acepta coma decimal, separadores de miles y símbolo €; descarta importes vacíos, no numéricos o negativos |
@@ -248,7 +249,7 @@ Regla de negocio común: **solo los pedidos `completed` cuentan como venta**.
 SELECT * FROM analytics.v_top_customers LIMIT 3;
 --  customer_rank |       customer        | main_country | orders | total_amount
 --              1 | Albano Llopis Hierro  | España       |     79 |     38655.46
---              2 | Buenaventura de Bonet | España       |     33 |     14180.59
+--              2 | Buenaventura de Bonet | España       |     34 |     14233.84
 --              3 | Hugo Colón Ríos       | México       |     34 |     13126.62
 ```
 
@@ -404,7 +405,7 @@ Los motivos de cada frase descartada quedan en el log del servidor (`Discarded L
 ## Tests
 
 ```bash
-uv run pytest                                   # 244 tests unitarios: sin Docker; LLM y BD simulados
+uv run pytest                                   # 246 tests unitarios: sin Docker; LLM y BD simulados
 
 docker compose up -d postgres                   # integración: PostgreSQL real
 RUN_INTEGRATION=1 uv run pytest -m integration  # 13 tests (vacían y recargan analytics.orders)
@@ -418,7 +419,7 @@ En PowerShell: `$env:RUN_INTEGRATION = "1"; uv run pytest -m integration`. Los t
 | ------------------------------ | ----- | ---------------------------------------------------------------------------------- |
 | `test_generate.py`             | 6     | Tamaño, reproducibilidad, cada defecto aparece, defectos componibles               |
 | `test_parsers.py`              | 32    | Formatos de fecha e importe aceptados y rechazados, normalización de texto         |
-| `test_clean.py`                | 8     | Duplicados, fechas, importes, estados, pasos personalizados, generador → limpieza  |
+| `test_clean.py`                | 10    | Duplicados, fechas, importes, estados, grafías de clientes, generador → limpieza   |
 | `test_validator.py`            | 93    | 19 consultas válidas, 52 ataques, límites, ámbito de los CTE, reglas personalizadas |
 | `test_llm.py`                  | 15    | Clientes LLM con la capa HTTP simulada: errores, `CANNOT_ANSWER`, prompts          |
 | `test_answers.py`              | 46    | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas |
@@ -516,6 +517,7 @@ SqlValidator(policy, rules=(*DEFAULT_RULES, no_select_star))
 - Las fechas numéricas se interpretan **día primero** (convención española); las ambiguas al estilo EE. UU. (`04/15/2025`) se descartan en vez de leerse mal.
 - Los **importes vacíos se descartan, no se imputan**: inventar importes falsearía las ventas. Se informa de cuántas filas se pierden (~4 %).
 - Los países se normalizan a su forma canónica ignorando mayúsculas y tildes; los desconocidos se conservan.
+- Los **clientes** no tienen una lista cerrada ni un identificador: el nombre es su identidad. Los nombres que solo difieren en mayúsculas o tildes se consideran el mismo cliente y se escriben con la grafía más frecuente (en caso de empate, la que tiene mayúsculas y tildes correctas). Sin este paso, `v_top_customers` repartía las ventas de una persona entre varias grafías (17 clientes afectados con los datos por defecto). A cambio, dos personas distintas cuyo nombre solo difiera en eso se fusionarían.
 - El CSV no se versiona: es reproducible con `--seed`.
 
 **Modelos**

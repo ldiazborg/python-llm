@@ -13,9 +13,11 @@
 
 - `parsers.py`: pure scalar functions returning a value or `None` (never raising): `parse_date` (8 formats, day-first), `parse_amount` (decimal comma, both thousands styles, `€`; keeps the sign), `normalize_spaces`, `fold` (case/accent-insensitive key), `build_canonicalizer`.
 - `clean.py`: `clean_orders(raw, steps=DEFAULT_STEPS)`; each step `(df, report) -> df` increments its own `CleaningReport` counters.
-- Step order matters: `normalize_text` → `drop_exact_duplicates` (after normalizing so variants collapse) → `parse_dates` → `parse_amounts` → `drop_invalid_status` → `drop_duplicate_ids` (only on loadable rows).
+- Step order matters: `normalize_text` → `unify_customer_spellings` (needs the whitespace cleanup) → `drop_exact_duplicates` (after normalizing so variants collapse) → `parse_dates` → `parse_amounts` → `drop_invalid_status` → `drop_duplicate_ids` (only on loadable rows).
+- `unify_customer_spellings` is the only **dataset-level** step: countries map onto a known list (`build_canonicalizer`), customers don't, so the canonical spelling is learned from the data — names equal under `fold` are one customer, written like most of their rows (`_spelling_rank` breaks ties: mixed case, then accents). The name is the customer's identity (no id column), so a variant left behind splits that customer's totals in `v_top_customers`. Its changes count in `text_values_normalized`; it never drops rows, so the invariant below is unaffected.
 - Invariant (tested): `rows_out == rows_in - duplicates_removed - rows_dropped_bad_date - rows_dropped_bad_amount - rows_dropped_invalid_status`.
-- Decisions: blank/invalid/negative amounts drop the row (never imputed); unknown countries are kept as written; unknown statuses dropped (DB CHECK would reject them).
+- Decisions: blank/invalid/negative amounts drop the row (never imputed); unknown countries are kept as written; unknown statuses dropped (DB CHECK would reject them); a customer seen in a single spelling is kept as written.
+- Not validated yet (the generator never produces them; listed as future work in the README): blank `order_id`/`customer`/`country`/`product`, implausible years (`01/01/0025` parses), amounts with 3+ decimals or exponents (`1.234` → 1.23, `1e5` → 100000).
 - Output types: `order_date` is `datetime.date`, `amount` is a float rounded to cents.
 
 ## Loading (`etl/load.py`)
