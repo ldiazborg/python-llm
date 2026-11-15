@@ -80,6 +80,7 @@ def test_ask_unanswerable_question(
         "SELECT * FROM pg_shadow",
         "SELECT 1; DELETE FROM orders",
         "Lo siento, no puedo ayudar con eso.",  # model ignored the instructions
+        "SELECT CURRENT_TIMESTAMP AS current_time",  # off-topic: reads no data
     ],
 )
 def test_ask_rejects_invalid_sql_without_running_it(

@@ -24,7 +24,8 @@ VALID = [
     "SELECT EXTRACT(MONTH FROM order_date) AS m, ROUND(AVG(amount), 2) FROM orders GROUP BY 1",
     "SELECT * FROM (SELECT country FROM orders) AS sub",
     "(SELECT * FROM orders)",
-    "SELECT 1;",  # trailing semicolon is not a second statement
+    "SELECT * FROM orders;",  # trailing semicolon is not a second statement
+    "WITH m AS (SELECT * FROM orders) SELECT COUNT(*) FROM m",  # data read via a CTE
 ]
 
 INVALID = [
@@ -59,6 +60,12 @@ INVALID = [
     "SET statement_timeout = 0",
     "EXPLAIN ANALYZE SELECT * FROM orders",
     "SELECT 1 " + "x" * 6000,  # too long
+    # Valid SQL that reads no data table (off-topic LLM answers)
+    "SELECT 1",
+    "SELECT CURRENT_TIMESTAMP AS current_time",
+    "SELECT 'No tengo datos del tiempo' AS respuesta",
+    "WITH m AS (SELECT 1 AS x) SELECT * FROM m",
+    "WITH orders AS (SELECT 1 AS x) SELECT * FROM orders",  # CTE shadows the real table
 ]
 
 
@@ -127,3 +134,16 @@ def test_parse_error_message_is_clean() -> None:
     with pytest.raises(InvalidQueryError) as info:
         validate_sql("SELECT * FROM", ALLOWED_TABLES, row_limit=LIMIT)
     assert str(info.value) == "Query could not be parsed (syntax error near line 1, column 13)"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT CURRENT_TIMESTAMP AS current_time",
+        "WITH orders AS (SELECT 1 AS x) SELECT * FROM orders",
+    ],
+)
+def test_rejects_queries_that_read_no_data(sql: str) -> None:
+    """Regression: the real model answered "¿Qué tiempo hace en Madrid?" with SELECT CURRENT_TIMESTAMP."""
+    with pytest.raises(InvalidQueryError, match="does not read any data table"):
+        validate_sql(sql, ALLOWED_TABLES, row_limit=LIMIT)
