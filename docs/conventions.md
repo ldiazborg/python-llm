@@ -3,7 +3,8 @@
 ## Git workflow
 
 - One branch per feature/task, prefixed `feat/`, `fix/`, `docs/`, `chore/`. Never put unrelated work on one branch.
-- Integrate into **`master`** (there is no `main` and no remote) with `git merge --no-ff <branch>` so each task stays visible in `git log --graph`.
+- Integrate into **`master`** (there is no `main`) with `git merge --no-ff <branch>` so each task stays visible in `git log --graph`.
+- The remote `origin` is the public GitHub repo and mirrors every branch, not only `master`: when pushing, push the feature branch too (`git push origin --all`). Push only when the user asks.
 - Commit messages: conventional prefix with scope, e.g. `feat(answers): ...`, `fix(validator): ...`, `docs(readme): ...`, plus a body explaining what/why.
 - The user may have uncommitted edits in the working tree: never fold them into your commits; stage only your own hunks.
 
