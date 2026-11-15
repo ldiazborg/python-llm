@@ -530,6 +530,7 @@ SqlValidator(policy, rules=(*DEFAULT_RULES, no_select_star))
 
 - Dos barreras independientes: validador sobre el AST + rol de solo lectura con timeout (ver [Seguridad de las consultas](#seguridad-de-las-consultas)).
 - La API nunca usa las credenciales del administrador.
+- Docker publica PostgreSQL y vLLM solo en `127.0.0.1`: no son accesibles desde otros equipos de la red.
 
 **LLM**
 

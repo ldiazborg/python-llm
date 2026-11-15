@@ -23,8 +23,10 @@ services:
       READER_USER: ${READER_USER}
       READER_PASSWORD: ${READER_PASSWORD}
     ports:
-      # host:container. Change POSTGRES_PORT if 5432 is taken by a local Postgres.
-      - "${POSTGRES_PORT:-5432}:5432"
+      # ip:host:container. Change POSTGRES_PORT if 5432 is taken by a local Postgres.
+      # 127.0.0.1: reachable from this machine only. Without it Docker publishes
+      # the port on every network interface, i.e. to the whole LAN/Wi-Fi.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       # Named volume: data survives `docker compose down` (use `down -v` to wipe it).
       - pgdata:/var/lib/postgresql/data
@@ -61,7 +63,8 @@ services:
       HF_TOKEN: ${HF_TOKEN:-}
     ports:
       # Host 8001 -> container 8000, so it doesn't collide with uvicorn's 8000.
-      - "${VLLM_PORT:-8001}:8000"
+      # 127.0.0.1: only the API on this machine talks to the model.
+      - "127.0.0.1:${VLLM_PORT:-8001}:8000"
     volumes:
       # Model cache: the ~3 GB download happens only on the first start.
       - hf-cache:/root/.cache/huggingface
