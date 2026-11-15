@@ -23,11 +23,13 @@ from orders_nl.etl.parsers import build_canonicalizer, fold, normalize_spaces, p
     ],
 )
 def test_parse_date_accepts_known_formats(raw: str, expected: date) -> None:
+    """Every supported layout parses, day-first for numeric dates."""
     assert parse_date(raw) == expected
 
 
 @pytest.mark.parametrize("raw", ["", "   ", None, "N/A", "sin fecha", "2025-13-45", "31/02/2025", "04/15/2025"])
 def test_parse_date_rejects_invalid(raw: str | None) -> None:
+    """Blank, placeholder, impossible and month-first dates return None."""
     assert parse_date(raw) is None
 
 
@@ -44,15 +46,18 @@ def test_parse_date_rejects_invalid(raw: str | None) -> None:
     ],
 )
 def test_parse_amount(raw: str, expected: Decimal) -> None:
+    """Decimal commas, both thousands styles, currency symbols and rounding."""
     assert parse_amount(raw) == expected
 
 
 @pytest.mark.parametrize("raw", ["", " ", None, "abc", "NaN", "Infinity", "12..5"])
 def test_parse_amount_rejects_invalid(raw: str | None) -> None:
+    """Blank, non-numeric, NaN and Infinity return None."""
     assert parse_amount(raw) is None
 
 
 def test_text_helpers() -> None:
+    """Whitespace collapsing, accent/case folding and canonicalization."""
     assert normalize_spaces("  Ana   López ") == "Ana López"
     assert fold("ESPAÑA") == fold("espana")
     canonical = build_canonicalizer(["España", "México"])

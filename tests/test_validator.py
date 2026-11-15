@@ -71,21 +71,25 @@ INVALID = [
 
 @pytest.mark.parametrize("sql", VALID)
 def test_accepts_read_only_queries_on_allowed_tables(sql: str) -> None:
+    """Legitimate read-only queries pass (CTEs, UNION, subqueries...)."""
     assert validate_sql(sql, ALLOWED_TABLES, row_limit=LIMIT)
 
 
 @pytest.mark.parametrize("sql", INVALID)
 def test_rejects_unsafe_or_unknown(sql: str) -> None:
+    """Writes, system tables, other schemas, dangerous functions and junk are rejected."""
     with pytest.raises(InvalidQueryError):
         validate_sql(sql, ALLOWED_TABLES, row_limit=LIMIT)
 
 
 def test_error_message_names_the_problem() -> None:
+    """The rejection reason names the offending table and the allowed ones."""
     with pytest.raises(InvalidQueryError, match="Table 'customers' is not allowed"):
         validate_sql("SELECT * FROM customers", ALLOWED_TABLES, row_limit=LIMIT)
 
 
 def test_adds_limit_when_missing() -> None:
+    """A query without LIMIT gets LIMIT row_limit."""
     out = validate_sql("SELECT * FROM orders", ALLOWED_TABLES, row_limit=LIMIT)
     assert f"LIMIT {LIMIT}" in out.upper()
 
@@ -99,6 +103,7 @@ def test_adds_limit_when_missing() -> None:
     ],
 )
 def test_clamps_excessive_limit(sql: str) -> None:
+    """LIMIT above row_limit, LIMIT ALL and UNION limits are lowered to row_limit."""
     out = validate_sql(sql, ALLOWED_TABLES, row_limit=LIMIT)
     assert "50000" not in out
     assert "ALL" not in out.upper().replace("UNION", "")
@@ -113,6 +118,7 @@ def test_clamps_excessive_limit(sql: str) -> None:
     ],
 )
 def test_keeps_smaller_limit(sql: str, expected: str) -> None:
+    """A LIMIT/FETCH below row_limit is kept as the model wrote it."""
     assert expected in validate_sql(sql, ALLOWED_TABLES, row_limit=LIMIT).upper()
 
 
@@ -120,6 +126,7 @@ def test_custom_rule_extends_the_validator() -> None:
     """Rules are pluggable: e.g. forbid SELECT * on top of the defaults."""
 
     def no_star(tree: exp.Expression, policy: QueryPolicy) -> None:
+        """Example extra rule: forbid SELECT *."""
         if tree.find(exp.Star):
             raise InvalidQueryError("SELECT * is not allowed")
 

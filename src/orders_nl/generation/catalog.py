@@ -1,7 +1,15 @@
 """Reference data the generator samples from: countries, products and statuses.
 
 Everything here is plain, immutable data so it can be swapped for a custom
-catalog via `GeneratorConfig` without touching the generation logic.
+catalog via `GeneratorConfig` without touching the generation logic:
+
+    GeneratorConfig(countries=(CountrySpec("Perú", "es", 10),), ...)
+
+(Faker has no es_PE locale, so the generic Spanish "es" is used; a new country
+must also be added to domain.KNOWN_COUNTRIES for the cleaner to keep it canonical.)
+
+Weights are relative (they don't need to add up to 100): `random.choices`
+normalizes them.
 """
 
 from dataclasses import dataclass
@@ -26,18 +34,24 @@ class CountrySpec:
 
 @dataclass(frozen=True)
 class ProductSpec:
-    """A product and the unit-price range it sells for (EUR)."""
+    """A product and the unit-price range it sells for (EUR).
+
+    Prices are Decimal so amounts are exact to the cent.
+    """
 
     name: str
     min_price: Decimal
     max_price: Decimal
 
     def __post_init__(self) -> None:
+        """Validate the price range as soon as the catalog entry is created."""
         # Fail fast on a bad catalog entry instead of producing odd amounts later.
         if not (Decimal(0) < self.min_price <= self.max_price):
             raise ValueError(f"Invalid price range for {self.name!r}")
 
 
+# Spain dominates (home market), then Latin America and a small US share.
+# Locales verified against faker.config.AVAILABLE_LOCALES.
 DEFAULT_COUNTRIES: tuple[CountrySpec, ...] = (
     CountrySpec("España", "es_ES", 35),
     CountrySpec("México", "es_MX", 20),
@@ -47,6 +61,8 @@ DEFAULT_COUNTRIES: tuple[CountrySpec, ...] = (
     CountrySpec("Estados Unidos", "en_US", 8),
 )
 
+# Tech/office products with realistic EUR price ranges; product names in Spanish
+# to match the language of the questions.
 DEFAULT_PRODUCTS: tuple[ProductSpec, ...] = (
     ProductSpec("Portátil", Decimal("600"), Decimal("1500")),
     ProductSpec("Monitor", Decimal("120"), Decimal("400")),

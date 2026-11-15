@@ -17,15 +17,18 @@ QUESTION = "¿Cuánto vendimos en España en marzo?"
 
 
 def test_health(client: TestClient) -> None:
+    """The liveness endpoint answers without touching the LLM or the database."""
     assert client.get("/health").json() == {"status": "ok"}
 
 
 @pytest.mark.parametrize("question", ["", "ab", "x" * 501])
 def test_ask_validates_question_length(client: TestClient, question: str) -> None:
+    """Empty, too-short and too-long questions are rejected by request validation."""
     assert client.post("/ask", json={"question": question}).status_code == 422
 
 
 def test_ask_returns_rows(client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner) -> None:
+    """Happy path: the validated SQL (with LIMIT) is executed and its rows returned."""
     fake_llm.sql = (
         "SELECT SUM(total_amount) AS total_sales FROM v_sales_by_month_country "
         "WHERE country = 'España' AND month = 3"
@@ -48,6 +51,7 @@ def test_ask_returns_rows(client: TestClient, fake_llm: FakeSQLGenerator, fake_d
 def test_ask_llm_failure_returns_clear_error(
     client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner
 ) -> None:
+    """LLM down -> 502 llm_unavailable with the exact error body; nothing is executed."""
     fake_llm.error = LLMError("The language model is unavailable (APIConnectionError)")
 
     resp = client.post("/ask", json={"question": QUESTION})
@@ -64,6 +68,7 @@ def test_ask_llm_failure_returns_clear_error(
 def test_ask_unanswerable_question(
     client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner
 ) -> None:
+    """CANNOT_ANSWER from the LLM -> 422 unanswerable_question; nothing is executed."""
     fake_llm.error = UnanswerableQuestionError("The question can't be answered")
 
     resp = client.post("/ask", json={"question": "¿Qué tiempo hace?"})
@@ -86,6 +91,7 @@ def test_ask_unanswerable_question(
 def test_ask_rejects_invalid_sql_without_running_it(
     client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner, bad_sql: str
 ) -> None:
+    """Unsafe or non-SQL output -> 422 invalid_query showing the SQL; nothing is executed."""
     fake_llm.sql = bad_sql
 
     resp = client.post("/ask", json={"question": "borra todo"})
@@ -109,6 +115,7 @@ def test_ask_rejects_invalid_sql_without_running_it(
 def test_ask_database_errors(
     client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner, error: Exception, status: int, code: str
 ) -> None:
+    """Each database failure type maps to its own status and error code."""
     fake_llm.sql = "SELECT x FROM orders"
     fake_db.error = error
 
@@ -134,6 +141,7 @@ SALES_RESULT = QueryResult(columns=["total_sales"], rows=[{"total_sales": 6215.3
 def test_ask_returns_grounded_llm_answer(
     client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner, fake_writer: FakeAnswerWriter
 ) -> None:
+    """A grounded sentence is returned as answer_source 'llm', alongside the data."""
     fake_llm.sql = SALES_SQL
     fake_db.result = SALES_RESULT
     fake_writer.text = "En marzo se vendieron 6.215,32 € en España."
@@ -150,6 +158,7 @@ def test_ask_returns_grounded_llm_answer(
 def test_ask_replaces_invented_numbers_with_template(
     client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner, fake_writer: FakeAnswerWriter
 ) -> None:
+    """A sentence with a wrong figure is replaced by the template."""
     fake_llm.sql = SALES_SQL
     fake_db.result = SALES_RESULT
     fake_writer.text = "En marzo se vendieron 6.512,32 € en España."  # digits swapped
@@ -178,6 +187,7 @@ def test_ask_answer_writer_failure_still_returns_data(
 def test_ask_without_natural_answer_skips_the_extra_llm_call(
     client: TestClient, fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner, fake_writer: FakeAnswerWriter
 ) -> None:
+    """natural_answer=false returns data only and never calls the writer."""
     fake_llm.sql = SALES_SQL
     fake_db.result = SALES_RESULT
 

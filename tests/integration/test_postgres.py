@@ -36,10 +36,12 @@ def loaded(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(scope="module")
 def reader():
+    """Query runner connected as the API's read-only role."""
     return make_readonly_runner(get_settings().reader_conninfo)
 
 
 def test_pipeline_loads_all_clean_rows(loaded, reader) -> None:
+    """Every row that survives cleaning ends up in analytics.orders."""
     rows = reader("SELECT count(*) AS n FROM orders").rows
     assert rows[0]["n"] == loaded.rows_loaded == loaded.report.rows_out
 
@@ -56,6 +58,7 @@ def test_pipeline_is_idempotent(loaded, tmp_path: Path) -> None:
 
 
 def test_views_are_readable_by_the_api_role(loaded, reader) -> None:
+    """Both views work, are visible to the API role, and agree with the base table."""
     top = reader("SELECT * FROM v_top_customers").rows
     assert [r["customer_rank"] for r in top] == list(range(1, 11))
     assert top[0]["total_amount"] >= top[-1]["total_amount"]
@@ -83,6 +86,7 @@ def test_api_role_cannot_write_or_read_secrets(loaded, reader, sql: str) -> None
 
 
 def test_runner_reports_columns_and_json_friendly_values(loaded, reader) -> None:
+    """Column names come back even for 0 rows, and numeric values are floats."""
     result = reader("SELECT country, sum(amount) AS total FROM orders GROUP BY country LIMIT 0")
     assert result.columns == ["country", "total"]  # known even with no rows
     total = reader("SELECT sum(amount) AS total FROM orders").rows[0]["total"]
@@ -90,6 +94,7 @@ def test_runner_reports_columns_and_json_friendly_values(loaded, reader) -> None
 
 
 def test_database_rejection_is_an_invalid_query(loaded, reader) -> None:
+    """A Postgres 'column does not exist' error becomes InvalidQueryError (HTTP 422)."""
     from orders_nl.errors import InvalidQueryError
 
     with pytest.raises(InvalidQueryError, match="does not exist"):
@@ -97,6 +102,7 @@ def test_database_rejection_is_an_invalid_query(loaded, reader) -> None:
 
 
 def test_statement_timeout_is_reported(loaded, reader) -> None:
+    """A query past the role's 5 s statement_timeout becomes QueryTimeoutError (HTTP 504)."""
     from orders_nl.errors import QueryTimeoutError
 
     with pytest.raises(QueryTimeoutError):

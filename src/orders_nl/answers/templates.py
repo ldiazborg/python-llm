@@ -1,6 +1,13 @@
 """Deterministic Spanish answers: the fallback when the LLM sentence can't be used.
 
 Plain, exact and instant. They read mechanically, but never misstate a number.
+
+Shapes, chosen by the size of the result:
+
+    0 rows             "No se encontraron resultados para esta pregunta."
+    1 row, 1 column    "El resultado es 6.215,32 (total_sales)."
+    1 row, n columns   "Resultado: product: Portátil, total_sales: 22.481,85."
+    n rows             "Se encontraron 6 resultados: Chile (pending_orders 8); ...; y 1 más."
 """
 
 from datetime import date, datetime
@@ -14,7 +21,11 @@ _TO_SPANISH = str.maketrans(",.", ".,")
 
 
 def format_number(value: int | float | Decimal) -> str:
-    """Spanish number format: thousands with '.', decimals with ',' (2 places)."""
+    """Spanish number format: thousands with '.', decimals with ',' (2 places).
+
+    Examples: 1138 -> "1.138", 6215.32 -> "6.215,32", Decimal("0.5") -> "0,50".
+    Integers (counts) keep no decimals; everything else is shown as money.
+    """
     if isinstance(value, int):
         return f"{value:,}".translate(_TO_SPANISH)
     return f"{float(value):,.2f}".translate(_TO_SPANISH)
@@ -24,10 +35,12 @@ def format_value(value: Any) -> str:
     """Human-readable cell value."""
     if value is None:
         return "sin datos"
+    # bool before numbers: bool is a subclass of int in Python.
     if isinstance(value, bool):
         return "sí" if value else "no"
     if isinstance(value, (int, float, Decimal)):
         return format_number(value)
+    # datetime before date: datetime is a subclass of date.
     if isinstance(value, datetime):
         return value.strftime("%d/%m/%Y %H:%M")
     if isinstance(value, date):
@@ -42,6 +55,7 @@ def _describe_row(row: dict[str, Any], columns: list[str]) -> str:
     simply the first column, so ranked results read "Albano (customer_rank 1,
     ...)" instead of "1 (customer Albano, ...)".
     """
+    # next(generator, default): first text column, or the first column if none.
     label_column = next((c for c in columns if isinstance(row.get(c), str)), columns[0])
     label = format_value(row.get(label_column))
     details = ", ".join(f"{c} {format_value(row.get(c))}" for c in columns if c != label_column)
@@ -49,10 +63,16 @@ def _describe_row(row: dict[str, Any], columns: list[str]) -> str:
 
 
 def template_answer(result: QueryResult, *, max_items: int = 5) -> str:
-    """Describe `result` in one Spanish sentence, choosing a shape by its size."""
+    """Describe `result` in one Spanish sentence, choosing a shape by its size.
+
+    Args:
+        result: the query result.
+        max_items: rows listed before summarizing the rest as "y N más".
+    """
     rows = result.rows
     if not rows:
         return "No se encontraron resultados para esta pregunta."
+    # Prefer the cursor's column order; fall back to the first row's keys.
     columns = result.columns or list(rows[0])
 
     if len(rows) == 1 and len(columns) == 1:

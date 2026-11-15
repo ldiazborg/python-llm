@@ -14,11 +14,13 @@ class FakeSQLGenerator:
     """Simulated LLM: returns a canned SQL string or raises a canned error."""
 
     def __init__(self, sql: str | None = None, error: Exception | None = None) -> None:
+        """Configure the canned reply: `sql` to return, or `error` to raise."""
         self.sql = sql
         self.error = error
         self.questions: list[str] = []  # what the API asked, for assertions
 
     def generate_sql(self, question: str) -> str:
+        """Record the question, then raise the canned error or return the canned SQL."""
         self.questions.append(question)
         if self.error is not None:
             raise self.error
@@ -30,11 +32,13 @@ class FakeQueryRunner:
     """Records executed SQL and returns canned rows (or raises a canned error)."""
 
     def __init__(self, result: QueryResult | None = None, error: Exception | None = None) -> None:
+        """Configure the canned result, or an error to raise when called."""
         self.result = result or QueryResult(columns=[], rows=[])
         self.error = error
         self.executed: list[str] = []
 
     def __call__(self, sql: str) -> QueryResult:
+        """Record the executed SQL, then raise the canned error or return the canned result."""
         self.executed.append(sql)
         if self.error is not None:
             raise self.error
@@ -45,11 +49,13 @@ class FakeAnswerWriter:
     """Simulated answer-writing LLM: canned sentence or canned error."""
 
     def __init__(self, text: str = "Respuesta de prueba.", error: Exception | None = None) -> None:
+        """Configure the canned sentence, or an error to raise."""
         self.text = text
         self.error = error
         self.calls: list[tuple[str, str, QueryResult]] = []  # (question, sql, result)
 
     def write_answer(self, question: str, sql: str, result: QueryResult) -> str:
+        """Record the call, then raise the canned error or return the canned sentence."""
         self.calls.append((question, sql, result))
         if self.error is not None:
             raise self.error
@@ -58,16 +64,19 @@ class FakeAnswerWriter:
 
 @pytest.fixture
 def fake_llm() -> FakeSQLGenerator:
+    """Simulated SQL-generating LLM; tests set `.sql` or `.error` before calling /ask."""
     return FakeSQLGenerator(sql="SELECT * FROM orders")
 
 
 @pytest.fixture
 def fake_db() -> FakeQueryRunner:
+    """Simulated database; tests set `.result` or `.error` and inspect `.executed`."""
     return FakeQueryRunner()
 
 
 @pytest.fixture
 def fake_writer() -> FakeAnswerWriter:
+    """Simulated answer-writing LLM; tests set `.text` or `.error` and inspect `.calls`."""
     return FakeAnswerWriter()
 
 
