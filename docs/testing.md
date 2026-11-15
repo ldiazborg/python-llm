@@ -13,6 +13,7 @@ Commands are in [commands.md](commands.md#tests). Unit tests need no Docker, no 
 | `test_llm.py` | both LLM clients over a mocked HTTP transport, prompt contents, `extract_sql` |
 | `test_answers.py` | number grounding/attribution (with real model outputs), templates, composer |
 | `test_db.py` | runner helpers that need no database: JSON-friendly values, unique column names, psycopg error → app error |
+| `test_config.py` | setting ranges rejected at load time, connection strings with special characters |
 | `test_api.py` | endpoint with all collaborators faked: success, every error code, natural answers |
 | `integration/test_postgres.py` | real load, idempotency, views, reader-role permissions with raw (unvalidated) SQL, timeout, repeated column names (opt-in) |
 
