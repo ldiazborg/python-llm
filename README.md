@@ -40,14 +40,15 @@ Proyecto en Python que:
 
 ```text
                 ┌──────────────── ETL (CLI) ────────────────┐
- orders-generate│  Faker + defectos  →  data/orders_raw.csv  │
- orders-load    │  limpieza (pasos)  →  analytics.orders     │──┐ usuario admin
-                │  schema.sql / views.sql → 2 vistas         │  │
-                └────────────────────────────────────────────┘  ▼
-                                                        ┌──────────────┐
- POST /ask ──► FastAPI ──► QueryService                 │  PostgreSQL  │
-                              │                         │   (Docker)   │
-                              ├─1─► LLM: pregunta → SQL ─┐└──────▲───────┘
+ orders-generate│  Faker + defectos  →  data/orders_raw.csv │
+ orders-load    │  limpieza (pasos)  →  analytics.orders    │──┐ usuario admin
+                │  schema.sql / views.sql → 2 vistas        │  │
+                └───────────────────────────────────────────┘  ▼
+                                                          ┌──────────────┐
+ POST /ask ──► FastAPI ──► QueryService                   │  PostgreSQL  │
+                              │                           │   (Docker)   │
+                              │                           └──────────────┘
+                              ├─1─► LLM: pregunta → SQL ─┐       ▲
                               │      (vLLM, Docker)      │       │ rol de solo
                               ├─2─► Validador (sqlglot) ◄┘       │ lectura
                               ├─3─► Ejecutor read-only ──────────┘
@@ -55,28 +56,32 @@ Proyecto en Python que:
                                     de cifras → (o plantilla)
 ```
 
-| Capa | Módulo | Responsabilidad |
-|---|---|---|
-| Dominio | `domain.py` | Columnas, estados y países: única fuente de verdad |
-| Generación | `generation/` | Pedidos sintéticos reproducibles + defectos componibles |
-| ETL | `etl/` | Parsers puros, limpieza por pasos, carga idempotente |
-| Modelos | `sql/` | Tabla `analytics.orders` y las dos vistas |
-| Validación | `validator.py` | Reglas sobre el AST de la SQL generada |
-| LLM | `llm/` | Prompts y clientes OpenAI-compatibles (SQL y redacción) |
-| Respuestas | `answers/` | Comprobación de cifras, plantillas y selección |
-| Servicio | `service.py` | Orquesta los pasos 1–4, sin depender de HTTP |
-| API | `api/` | FastAPI: rutas, esquemas y errores → HTTP |
+
+| Capa       | Módulo         | Responsabilidad                                         |
+| ---------- | -------------- | ------------------------------------------------------- |
+| Dominio    | `domain.py`    | Columnas, estados y países: única fuente de verdad      |
+| Generación | `generation/`  | Pedidos sintéticos reproducibles + defectos componibles |
+| ETL        | `etl/`         | Parsers puros, limpieza por pasos, carga idempotente    |
+| Modelos    | `sql/`         | Tabla `analytics.orders` y las dos vistas               |
+| Validación | `validator.py` | Reglas sobre el AST de la SQL generada                  |
+| LLM        | `llm/`         | Prompts y clientes OpenAI-compatibles (SQL y redacción) |
+| Respuestas | `answers/`     | Comprobación de cifras, plantillas y selección          |
+| Servicio   | `service.py`   | Orquesta los pasos 1–4, sin depender de HTTP            |
+| API        | `api/`         | FastAPI: rutas, esquemas y errores → HTTP               |
+
 
 Cada pieza del servicio (generador de SQL, validador, ejecutor, redactor) se **inyecta**, así que los tests sustituyen el LLM y la base de datos por versiones simuladas sin tocar el código.
 
 ## Requisitos
 
-| Herramienta | Versión | Para qué |
-|---|---|---|
-| Python | ≥ 3.12 (desarrollado con 3.14) | la aplicación |
-| [uv](https://docs.astral.sh/uv/) | reciente | entorno y dependencias (`uv.lock`) |
-| Docker | con Compose v2 | PostgreSQL 17 y vLLM |
-| GPU NVIDIA | ≥ 4 GB de VRAM | vLLM con `Qwen/Qwen2.5-Coder-1.5B-Instruct` (fp16) |
+
+| Herramienta                      | Versión                        | Para qué                                           |
+| -------------------------------- | ------------------------------ | -------------------------------------------------- |
+| Python                           | ≥ 3.12 (desarrollado con 3.14) | la aplicación                                      |
+| [uv](https://docs.astral.sh/uv/) | reciente                       | entorno y dependencias (`uv.lock`)                 |
+| Docker                           | con Compose v2                 | PostgreSQL 17 y vLLM                               |
+| GPU NVIDIA                       | ≥ 4 GB de VRAM                 | vLLM con `Qwen/Qwen2.5-Coder-1.5B-Instruct` (fp16) |
+
 
 En **Windows** hace falta Docker Desktop con backend **WSL2** y un driver NVIDIA reciente para que el contenedor vea la GPU. Sin GPU se puede usar todo menos el LLM: los tests no la necesitan, y la API responde `502 llm_unavailable` de forma controlada.
 
@@ -123,25 +128,27 @@ En `http://localhost:8000/docs` está la documentación interactiva (OpenAPI) pa
 
 Todas las variables están documentadas en `.env.example`. Las lee `docker compose` (infraestructura) o la aplicación (`config.py`, con `pydantic-settings`); las variables de entorno reales tienen prioridad sobre `.env`.
 
-| Variable | Por defecto | Usada por | Descripción |
-|---|---|---|---|
-| `PG_HOST` | `localhost` | app | Host de PostgreSQL |
-| `POSTGRES_PORT` | `5432` | compose + app | Puerto publicado (cámbialo si ya hay un Postgres local) |
-| `POSTGRES_DB` | `orders` | compose + app | Base de datos |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` | `orders_admin` / — | compose + app | Usuario administrador: lo usa **solo** el ETL |
-| `READER_USER` / `READER_PASSWORD` | `orders_reader` / — | compose + app | Rol de **solo lectura**: lo usa la API |
-| `VLLM_IMAGE_TAG` | `v0.10.2` | compose | Versión de la imagen de vLLM |
-| `VLLM_PORT` | `8001` | compose | Puerto de vLLM en el host |
-| `LLM_MODEL_ID` | `Qwen/Qwen2.5-Coder-1.5B-Instruct` | compose | Modelo de Hugging Face |
-| `VLLM_GPU_MEM_UTIL` | `0.80` | compose | Fracción de la VRAM **total** que reserva vLLM ([ver problemas](#solución-de-problemas)) |
-| `VLLM_MAX_MODEL_LEN` | `2048` | compose | Tokens máximos por petición (prompt + respuesta) |
-| `HF_TOKEN` | vacío | compose | Solo para modelos con acceso restringido |
-| `LLM_BASE_URL` | `http://localhost:8001/v1` | app | Cualquier servidor OpenAI-compatible |
-| `LLM_MODEL` | `qwen-coder` | compose + app | Nombre con el que vLLM sirve el modelo |
-| `LLM_API_KEY` | — | compose + app | Secreto compartido entre vLLM y la API |
-| `LLM_TIMEOUT_S` | `30` | app | Tiempo máximo por llamada al LLM |
-| `QUERY_ROW_LIMIT` | `1000` | app | Filas máximas por consulta (se fuerza con `LIMIT`) |
-| `ANSWER_MAX_ROWS` | `20` | app | Filas que se envían al LLM para redactar la respuesta |
+
+| Variable                              | Por defecto                        | Usada por     | Descripción                                                                              |
+| ------------------------------------- | ---------------------------------- | ------------- | ---------------------------------------------------------------------------------------- |
+| `PG_HOST`                             | `localhost`                        | app           | Host de PostgreSQL                                                                       |
+| `POSTGRES_PORT`                       | `5432`                             | compose + app | Puerto publicado (cámbialo si ya hay un Postgres local)                                  |
+| `POSTGRES_DB`                         | `orders`                           | compose + app | Base de datos                                                                            |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` | `orders_admin` / —                 | compose + app | Usuario administrador: lo usa **solo** el ETL                                            |
+| `READER_USER` / `READER_PASSWORD`     | `orders_reader` / —                | compose + app | Rol de **solo lectura**: lo usa la API                                                   |
+| `VLLM_IMAGE_TAG`                      | `v0.10.2`                          | compose       | Versión de la imagen de vLLM                                                             |
+| `VLLM_PORT`                           | `8001`                             | compose       | Puerto de vLLM en el host                                                                |
+| `LLM_MODEL_ID`                        | `Qwen/Qwen2.5-Coder-1.5B-Instruct` | compose       | Modelo de Hugging Face                                                                   |
+| `VLLM_GPU_MEM_UTIL`                   | `0.80`                             | compose       | Fracción de la VRAM **total** que reserva vLLM ([ver problemas](#solución-de-problemas)) |
+| `VLLM_MAX_MODEL_LEN`                  | `2048`                             | compose       | Tokens máximos por petición (prompt + respuesta)                                         |
+| `HF_TOKEN`                            | vacío                              | compose       | Solo para modelos con acceso restringido                                                 |
+| `LLM_BASE_URL`                        | `http://localhost:8001/v1`         | app           | Cualquier servidor OpenAI-compatible                                                     |
+| `LLM_MODEL`                           | `qwen-coder`                       | compose + app | Nombre con el que vLLM sirve el modelo                                                   |
+| `LLM_API_KEY`                         | —                                  | compose + app | Secreto compartido entre vLLM y la API                                                   |
+| `LLM_TIMEOUT_S`                       | `30`                               | app           | Tiempo máximo por llamada al LLM                                                         |
+| `QUERY_ROW_LIMIT`                     | `1000`                             | app           | Filas máximas por consulta (se fuerza con `LIMIT`)                                       |
+| `ANSWER_MAX_ROWS`                     | `20`                               | app           | Filas que se envían al LLM para redactar la respuesta                                    |
+
 
 ## Datos: generación, limpieza y carga
 
@@ -149,23 +156,27 @@ Todas las variables están documentadas en `.env.example`. Las lee `docker compo
 
 Genera pedidos válidos con **Faker** (nombres con el locale de cada país) y después les aplica **defectos intencionados**. Es reproducible: la misma semilla produce siempre el mismo CSV.
 
-| Columna | Ejemplo | Notas |
-|---|---|---|
-| `order_id` | `ORD-000532` | Añadida al enunciado: identifica duplicados y es la clave primaria |
-| `order_date` | `2025-03-08` | Uniforme en 2025 |
-| `customer` | `Paco Rocamora Nieto` | 40 clientes por país; unos pocos compran mucho más (distribución tipo Zipf), así el top 10 tiene sentido |
-| `country` | `España` | España 35 %, México 20 %, Argentina 15 %, Colombia 12 %, Chile 10 %, EE. UU. 8 % |
-| `product` | `Portátil` | 10 productos con rango de precio realista |
-| `amount` | `2069.54` | Precio unitario × cantidad (1–3), exacto al céntimo |
-| `status` | `completed` | completed 75 %, pending 10 %, cancelled 10 %, refunded 5 % |
 
-| Defecto | Tasa | Qué hace |
-|---|---|---|
-| `MalformedDates` | 6 % | Reescribe la fecha en otro formato (`15/03/2025`, `20250315`, …); un 25 % de ellas se vuelven imposibles (`2025-13-45`, `31/02/2025`, `N/A`, vacía) |
-| `MissingAmounts` | 4 % | Importe vacío o con espacios |
-| `CommaDecimalAmounts` | 3 % | Coma decimal (`12,50`) |
-| `MessyText` | 5 % | País/cliente en mayúsculas, minúsculas, con espacios de más o sin tildes |
-| `DuplicateRows` | 3 % | Copias exactas de filas (se aplica el último) |
+| Columna      | Ejemplo               | Notas                                                                                                    |
+| ------------ | --------------------- | -------------------------------------------------------------------------------------------------------- |
+| `order_id`   | `ORD-000532`          | Añadida al enunciado: identifica duplicados y es la clave primaria                                       |
+| `order_date` | `2025-03-08`          | Uniforme en 2025                                                                                         |
+| `customer`   | `Paco Rocamora Nieto` | 40 clientes por país; unos pocos compran mucho más (distribución tipo Zipf), así el top 10 tiene sentido |
+| `country`    | `España`              | España 35 %, México 20 %, Argentina 15 %, Colombia 12 %, Chile 10 %, EE. UU. 8 %                         |
+| `product`    | `Portátil`            | 10 productos con rango de precio realista                                                                |
+| `amount`     | `2069.54`             | Precio unitario × cantidad (1–3), exacto al céntimo                                                      |
+| `status`     | `completed`           | completed 75 %, pending 10 %, cancelled 10 %, refunded 5 %                                               |
+
+
+
+| Defecto               | Tasa | Qué hace                                                                                                                                            |
+| --------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MalformedDates`      | 6 %  | Reescribe la fecha en otro formato (`15/03/2025`, `20250315`, …); un 25 % de ellas se vuelven imposibles (`2025-13-45`, `31/02/2025`, `N/A`, vacía) |
+| `MissingAmounts`      | 4 %  | Importe vacío o con espacios                                                                                                                        |
+| `CommaDecimalAmounts` | 3 %  | Coma decimal (`12,50`)                                                                                                                              |
+| `MessyText`           | 5 %  | País/cliente en mayúsculas, minúsculas, con espacios de más o sin tildes                                                                            |
+| `DuplicateRows`       | 3 %  | Copias exactas de filas (se aplica el último)                                                                                                       |
+
 
 Opciones: `--rows`, `--seed`, `--out` y `--clean` (sin defectos).
 
@@ -173,14 +184,16 @@ Opciones: `--rows`, `--seed`, `--out` y `--clean` (sin defectos).
 
 Un *pipeline* de pasos independientes (`etl/clean.py`); cada uno corrige un tipo de problema y anota lo que hizo en un `CleaningReport`:
 
-| Paso | Qué hace |
-|---|---|
-| `normalize_text` | Recorta espacios, unifica países (`ESPANA`, ` españa ` → `España`) y pasa los estados a minúsculas |
-| `drop_exact_duplicates` | Elimina filas idénticas (tras normalizar el texto) |
-| `parse_dates` | Acepta 8 formatos (día primero); descarta las fechas imposibles o vacías |
-| `parse_amounts` | Acepta coma decimal, separadores de miles y símbolo €; descarta importes vacíos, no numéricos o negativos |
-| `drop_invalid_status` | Descarta estados desconocidos (la tabla tiene un `CHECK`) |
-| `drop_duplicate_ids` | Un `order_id` repetido se queda con la primera fila |
+
+| Paso                    | Qué hace                                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `normalize_text`        | Recorta espacios, unifica países (`ESPANA`, `españa` → `España`) y pasa los estados a minúsculas          |
+| `drop_exact_duplicates` | Elimina filas idénticas (tras normalizar el texto)                                                        |
+| `parse_dates`           | Acepta 8 formatos (día primero); descarta las fechas imposibles o vacías                                  |
+| `parse_amounts`         | Acepta coma decimal, separadores de miles y símbolo €; descarta importes vacíos, no numéricos o negativos |
+| `drop_invalid_status`   | Descarta estados desconocidos (la tabla tiene un `CHECK`)                                                 |
+| `drop_duplicate_ids`    | Un `order_id` repetido se queda con la primera fila                                                       |
+
 
 Cada fila de entrada queda contabilizada: `rows_out = rows_in − duplicados − descartadas`. Con los datos por defecto se conservan 1.138 de 1.236 filas (~92 %).
 
@@ -194,13 +207,15 @@ Cada fila de entrada queda contabilizada: `rows_out = rows_in − duplicados −
 
 Tabla `analytics.orders`:
 
-| Columna | Tipo | Restricción |
-|---|---|---|
-| `order_id` | `text` | `PRIMARY KEY` |
-| `order_date` | `date` | `NOT NULL` |
-| `customer`, `country`, `product` | `text` | `NOT NULL` |
-| `amount` | `numeric(12,2)` | `NOT NULL`, `>= 0` |
-| `status` | `text` | `IN ('completed','pending','cancelled','refunded')` |
+
+| Columna                          | Tipo            | Restricción                                         |
+| -------------------------------- | --------------- | --------------------------------------------------- |
+| `order_id`                       | `text`          | `PRIMARY KEY`                                       |
+| `order_date`                     | `date`          | `NOT NULL`                                          |
+| `customer`, `country`, `product` | `text`          | `NOT NULL`                                          |
+| `amount`                         | `numeric(12,2)` | `NOT NULL`, `>= 0`                                  |
+| `status`                         | `text`          | `IN ('completed','pending','cancelled','refunded')` |
+
 
 Con índices en `order_date` y `country`, los filtros más habituales.
 
@@ -210,20 +225,24 @@ Regla de negocio común: **solo los pedidos `completed` cuentan como venta**.
 
 **`v_sales_by_month_country`**: ventas por mes y país.
 
-| Columna | Descripción |
-|---|---|
-| `year`, `month` | Enteros, para que el LLM filtre "en marzo" con `month = 3` sin aritmética de fechas |
-| `month_start` | Primer día del mes (`date`) |
-| `country` | País |
-| `orders`, `total_amount`, `avg_order_amount` | Nº de pedidos, total y ticket medio |
+
+| Columna                                      | Descripción                                                                         |
+| -------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `year`, `month`                              | Enteros, para que el LLM filtre "en marzo" con `month = 3` sin aritmética de fechas |
+| `month_start`                                | Primer día del mes (`date`)                                                         |
+| `country`                                    | País                                                                                |
+| `orders`, `total_amount`, `avg_order_amount` | Nº de pedidos, total y ticket medio                                                 |
+
 
 **`v_top_customers`**: los 10 clientes con más ventas.
 
-| Columna | Descripción |
-|---|---|
-| `customer_rank` | 1 = mejor cliente; empates resueltos por nombre, así que siempre hay exactamente 10 filas |
-| `customer`, `main_country` | Cliente y el país desde el que más compra |
-| `orders`, `total_amount` | Nº de pedidos y total |
+
+| Columna                    | Descripción                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------- |
+| `customer_rank`            | 1 = mejor cliente; empates resueltos por nombre, así que siempre hay exactamente 10 filas |
+| `customer`, `main_country` | Cliente y el país desde el que más compra                                                 |
+| `orders`, `total_amount`   | Nº de pedidos y total                                                                     |
+
 
 ```sql
 SELECT * FROM analytics.v_top_customers LIMIT 3;
@@ -235,28 +254,34 @@ SELECT * FROM analytics.v_top_customers LIMIT 3;
 
 ## API
 
-| Método | Ruta | Descripción |
-|---|---|---|
-| `GET` | `/health` | Comprobación de vida (no llama al LLM ni a la BD) |
-| `POST` | `/ask` | Pregunta en lenguaje natural → SQL validada → datos + respuesta redactada |
-| `GET` | `/docs` | Documentación interactiva (OpenAPI) |
+
+| Método | Ruta      | Descripción                                                               |
+| ------ | --------- | ------------------------------------------------------------------------- |
+| `GET`  | `/health` | Comprobación de vida (no llama al LLM ni a la BD)                         |
+| `POST` | `/ask`    | Pregunta en lenguaje natural → SQL validada → datos + respuesta redactada |
+| `GET`  | `/docs`   | Documentación interactiva (OpenAPI)                                       |
+
 
 ### Petición
 
-| Campo | Tipo | Por defecto | Descripción |
-|---|---|---|---|
-| `question` | string (3–500) | — | La pregunta |
-| `natural_answer` | bool | `true` | Redactar también la respuesta (una segunda llamada al LLM); `false` = solo datos |
+
+| Campo            | Tipo           | Por defecto | Descripción                                                                      |
+| ---------------- | -------------- | ----------- | -------------------------------------------------------------------------------- |
+| `question`       | string (3–500) | —           | La pregunta                                                                      |
+| `natural_answer` | bool           | `true`      | Redactar también la respuesta (una segunda llamada al LLM); `false` = solo datos |
+
 
 ### Respuesta
 
-| Campo | Descripción |
-|---|---|
-| `question` | La pregunta recibida |
-| `answer` | La respuesta en lenguaje natural (`null` si `natural_answer=false`) |
-| `answer_source` | `"llm"` (frase del modelo, verificada) o `"template"` (texto determinista) |
-| `sql` | La SQL **validada que se ejecutó** (con `LIMIT`) |
-| `columns`, `rows`, `row_count` | El resultado completo |
+
+| Campo                          | Descripción                                                                |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| `question`                     | La pregunta recibida                                                       |
+| `answer`                       | La respuesta en lenguaje natural (`null` si `natural_answer=false`)        |
+| `answer_source`                | `"llm"` (frase del modelo, verificada) o `"template"` (texto determinista) |
+| `sql`                          | La SQL **validada que se ejecutó** (con `LIMIT`)                           |
+| `columns`, `rows`, `row_count` | El resultado completo                                                      |
+
 
 ### Ejemplos
 
@@ -303,14 +328,16 @@ Con la GPU de 4 GB, una pregunta tarda ~1–3 s (dos llamadas al LLM); con `natu
 
 Los errores de la aplicación tienen todos la misma forma: `{"error": "<código>", "detail": "<explicación>", "sql": "<SQL rechazada o null>"}`.
 
-| HTTP | `error` | Cuándo |
-|---|---|---|
-| 502 | `llm_unavailable` | El LLM no responde, da error o devuelve una respuesta vacía |
-| 422 | `unanswerable_question` | El LLM indica que la pregunta no se puede responder con estos datos |
-| 422 | `invalid_query` | La SQL no pasa la validación, o la base de datos la rechaza (columna inexistente…) |
-| 504 | `query_timeout` | La consulta supera el `statement_timeout` (5 s) |
-| 500 | `query_failed` | Fallo operativo de la base de datos (sin filtrar detalles internos) |
-| 422 | *(FastAPI)* | Petición mal formada (p. ej. pregunta de menos de 3 caracteres). Este error lo genera FastAPI antes de llegar a la aplicación, con su formato estándar (`{"detail": [...]}`) |
+
+| HTTP | `error`                 | Cuándo                                                                                                                                                                       |
+| ---- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 502  | `llm_unavailable`       | El LLM no responde, da error o devuelve una respuesta vacía                                                                                                                  |
+| 422  | `unanswerable_question` | El LLM indica que la pregunta no se puede responder con estos datos                                                                                                          |
+| 422  | `invalid_query`         | La SQL no pasa la validación, o la base de datos la rechaza (columna inexistente…)                                                                                           |
+| 504  | `query_timeout`         | La consulta supera el `statement_timeout` (5 s)                                                                                                                              |
+| 500  | `query_failed`          | Fallo operativo de la base de datos (sin filtrar detalles internos)                                                                                                          |
+| 422  | *(FastAPI)*             | Petición mal formada (p. ej. pregunta de menos de 3 caracteres). Este error lo genera FastAPI antes de llegar a la aplicación, con su formato estándar (`{"detail": [...]}`) |
+
 
 Ejemplos reales con el modelo:
 
@@ -334,15 +361,17 @@ La SQL generada por el LLM se trata como **entrada no confiable**. Hay dos barre
 
 **1. Validador (`validator.py`)**: analiza la SQL con **sqlglot** y recorre el árbol sintáctico completo (no usa expresiones regulares, que se engañan con subconsultas, CTE o comentarios). Las reglas son funciones independientes:
 
-| Regla | Rechaza (ejemplo) | Mensaje |
-|---|---|---|
-| Una sola sentencia | `SELECT 1; DROP TABLE orders` | `Exactly one statement is allowed (got 2)` |
-| Raíz de lectura | `DELETE FROM orders`, `SET statement_timeout = 0` | `Only SELECT queries are allowed (got DELETE)` |
-| Sin efectos secundarios en ningún nodo | `WITH x AS (DELETE …) SELECT …`, `SELECT … INTO t`, `FOR UPDATE` | `Forbidden operation in query: DELETE` |
-| Solo tablas permitidas del esquema `analytics` | `pg_catalog.pg_user`, `public.orders`, `customers` | `Table 'customers' is not allowed. Allowed: …` |
-| Leer al menos una tabla permitida | `SELECT CURRENT_TIMESTAMP` | `The query does not read any data table; …` |
-| Sin funciones de sistema | `pg_sleep(10)`, `pg_read_file(…)`, `set_config(…)` | `Function 'pg_sleep' is not allowed` |
-| `LIMIT` máximo | `SELECT * FROM orders` | *(no rechaza: añade `LIMIT 1000` o reduce uno mayor)* |
+
+| Regla                                          | Rechaza (ejemplo)                                                | Mensaje                                               |
+| ---------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------- |
+| Una sola sentencia                             | `SELECT 1; DROP TABLE orders`                                    | `Exactly one statement is allowed (got 2)`            |
+| Raíz de lectura                                | `DELETE FROM orders`, `SET statement_timeout = 0`                | `Only SELECT queries are allowed (got DELETE)`        |
+| Sin efectos secundarios en ningún nodo         | `WITH x AS (DELETE …) SELECT …`, `SELECT … INTO t`, `FOR UPDATE` | `Forbidden operation in query: DELETE`                |
+| Solo tablas permitidas del esquema `analytics` | `pg_catalog.pg_user`, `public.orders`, `customers`               | `Table 'customers' is not allowed. Allowed: …`        |
+| Leer al menos una tabla permitida              | `SELECT CURRENT_TIMESTAMP`                                       | `The query does not read any data table; …`           |
+| Sin funciones de sistema                       | `pg_sleep(10)`, `pg_read_file(…)`, `set_config(…)`               | `Function 'pg_sleep' is not allowed`                  |
+| `LIMIT` máximo                                 | `SELECT * FROM orders`                                           | *(no rechaza: añade `LIMIT 1000` o reduce uno mayor)* |
+
 
 Los 36 casos de ataque de `tests/test_validator.py` se rechazan cada uno por el motivo esperado.
 
@@ -355,12 +384,14 @@ Tras ejecutar la consulta, el mismo LLM redacta la respuesta en una o dos frases
 1. **Cada número existe en los datos**: en las filas, en la pregunta o en la SQL. Se aceptan el formato español e inglés (`6.215,32` / `6,215.32`) y los redondeos (`unos 6.215 €`). Detecta cifras inventadas, alteradas (`6.512,32`) o calculadas (porcentajes, totales).
 2. **Cada número está junto a la fila correcta**: una cifra escrita tras un nombre ("Chile … 8") debe pertenecer a la fila de ese nombre, y un marcador de lista ("1. Albano…") debe ser el ranking o la posición real de esa fila. Detecta rankings invertidos.
 
-| Situación | `answer_source` | Ejemplo |
-|---|---|---|
-| Frase correcta | `llm` | *"El producto más vendido en México fue el Portátil, con un total de ventas de 22.481,85 €."* |
-| Ranking desordenado por el modelo | `template` | *"Se encontraron 3 resultados: Albano Llopis Hierro (customer_rank 1, total_amount 38.655,46); …"* |
-| Cifra inventada | `template` | *"El resultado es 6.215,32 (total_sales)."* |
-| El LLM falla al redactar | `template` | *(la petición devuelve igualmente 200 con los datos)* |
+
+| Situación                         | `answer_source` | Ejemplo                                                                                              |
+| --------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------- |
+| Frase correcta                    | `llm`           | *"El producto más vendido en México fue el Portátil, con un total de ventas de 22.481,85 €."*        |
+| Ranking desordenado por el modelo | `template`      | *"Se encontraron 3 resultados: Albano Llopis Hierro (customer\_rank 1, total\_amount 38.655,46); …"* |
+| Cifra inventada                   | `template`      | *"El resultado es 6.215,32 (total\_sales)."*                                                         |
+| El LLM falla al redactar          | `template`      | *(la petición devuelve igualmente 200 con los datos)*                                                |
+
 
 Los motivos de cada frase descartada quedan en el log del servidor (`Discarded LLM answer (…)`), útil para ajustar el prompt.
 
@@ -376,16 +407,18 @@ uv run orders-load                              # después, recargar el conjunto
 
 En PowerShell: `$env:RUN_INTEGRATION = "1"; uv run pytest -m integration`. Los tests de integración se omiten salvo que `RUN_INTEGRATION=1`, porque modifican la base de datos.
 
-| Archivo | Tests | Qué cubre |
-|---|---|---|
-| `test_generate.py` | 6 | Tamaño, reproducibilidad, cada defecto aparece, defectos componibles |
-| `test_parsers.py` | 32 | Formatos de fecha e importe aceptados y rechazados, normalización de texto |
-| `test_clean.py` | 8 | Duplicados, fechas, importes, estados, pasos personalizados, generador → limpieza |
-| `test_validator.py` | 58 | 11 consultas válidas, 36 ataques, límites, mensajes, reglas personalizadas |
-| `test_llm.py` | 15 | Clientes LLM con la capa HTTP simulada: errores, `CANNOT_ANSWER`, prompts |
-| `test_answers.py` | 44 | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas |
-| `test_api.py` | 19 | Endpoint con LLM y BD simulados: éxito, cada código de error, respuesta redactada |
-| `integration/test_postgres.py` | 9 | Carga real, idempotencia, vistas, permisos del rol, timeout |
+
+| Archivo                        | Tests | Qué cubre                                                                          |
+| ------------------------------ | ----- | ---------------------------------------------------------------------------------- |
+| `test_generate.py`             | 6     | Tamaño, reproducibilidad, cada defecto aparece, defectos componibles               |
+| `test_parsers.py`              | 32    | Formatos de fecha e importe aceptados y rechazados, normalización de texto         |
+| `test_clean.py`                | 8     | Duplicados, fechas, importes, estados, pasos personalizados, generador → limpieza  |
+| `test_validator.py`            | 58    | 11 consultas válidas, 36 ataques, límites, mensajes, reglas personalizadas         |
+| `test_llm.py`                  | 15    | Clientes LLM con la capa HTTP simulada: errores, `CANNOT_ANSWER`, prompts          |
+| `test_answers.py`              | 44    | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas |
+| `test_api.py`                  | 19    | Endpoint con LLM y BD simulados: éxito, cada código de error, respuesta redactada  |
+| `integration/test_postgres.py` | 9     | Carga real, idempotencia, vistas, permisos del rol, timeout                        |
+
 
 Los tres tests que pide el enunciado: limpieza (`test_clean.py`), validación de la consulta (`test_validator.py`) y endpoint con el LLM simulado (`test_api.py`).
 
@@ -470,6 +503,7 @@ SqlValidator(policy, rules=(*DEFAULT_RULES, no_select_star))
 ## Decisiones
 
 **Datos y limpieza**
+
 - `order_id` añadido a las columnas pedidas: permite detectar duplicados y es la clave primaria.
 - Errores generados: duplicados exactos, fechas en varios formatos e imposibles, importes vacíos, importes con coma decimal y texto con mayúsculas/espacios/tildes inconsistentes.
 - Las fechas numéricas se interpretan **día primero** (convención española); las ambiguas al estilo EE. UU. (`04/15/2025`) se descartan en vez de leerse mal.
@@ -478,21 +512,25 @@ SqlValidator(policy, rules=(*DEFAULT_RULES, no_select_star))
 - El CSV no se versiona: es reproducible con `--seed`.
 
 **Modelos**
+
 - Solo los pedidos `completed` cuentan como venta (pendientes, cancelados y reembolsados no).
 - `v_sales_by_month_country` expone `year` y `month` como enteros para que un modelo pequeño pueda filtrar "en marzo" sin aritmética de fechas.
 - `v_top_customers` desempata por nombre para devolver siempre exactamente 10 filas.
 
 **Seguridad**
+
 - Dos barreras independientes: validador sobre el AST + rol de solo lectura con timeout (ver [Seguridad de las consultas](#seguridad-de-las-consultas)).
 - La API nunca usa las credenciales del administrador.
 
 **LLM**
+
 - vLLM con cliente OpenAI-compatible: la aplicación no depende del proveedor.
 - `Qwen2.5-Coder-1.5B-Instruct` en fp16 para caber en 4 GB de VRAM (`--enforce-eager`, `--max-model-len 2048`). Al ser pequeño, el prompt lleva el esquema, las reglas de negocio y ejemplos few-shot, y `temperature=0`.
 - El cliente OpenAI se inyecta, de modo que los tests simulan la capa HTTP sin servidor.
 - **Respuesta en lenguaje natural híbrida**: el LLM redacta, pero solo se acepta si cada cifra existe en los datos y está junto a la fila correcta; si no, plantilla determinista. Un fallo al redactar nunca convierte una consulta correcta en un error. Se mantienen `sql` y `rows` en la respuesta para poder verificarla.
 
 **Código**
+
 - `QueryService` no depende de FastAPI; la API solo traduce HTTP y errores.
 - Los endpoints son síncronos a propósito: los clientes de LLM y BD son bloqueantes y FastAPI los ejecuta en un pool de hilos.
 - Uvicorn como servidor ASGI (el recomendado por FastAPI); la API corre en el host con `--reload` para iterar rápido, y solo la infraestructura va en Docker.
@@ -501,32 +539,36 @@ SqlValidator(policy, rules=(*DEFAULT_RULES, no_select_star))
 
 Cada funcionalidad o tarea se desarrolló en su propia rama y se integró en `master` con `git merge --no-ff`, para que cada una quede visible en el historial (`git log --graph`):
 
-| Rama | Contenido |
-|---|---|
-| `chore/project-scaffolding` | Estructura, Docker Compose, configuración, esqueleto de la API |
-| `feat/data-generation` | Generador con Faker y defectos |
-| `feat/data-cleaning` | Parsers y pipeline de limpieza |
-| `feat/postgres-load-and-views` | Carga, tabla, vistas y tests de integración |
-| `feat/sql-validator` | Validación sobre el AST |
-| `feat/nl-query-endpoint` | Servicio, prompt y endpoint `/ask` |
-| `docs/readme` | Primera versión de este README |
-| `fix/require-table-reference` | Regla "leer al menos una tabla" |
-| `chore/vllm-memory-defaults` | `VLLM_GPU_MEM_UTIL=0.80` para GPUs de 4 GB |
-| `feat/natural-language-answer` | Respuesta redactada con comprobación de cifras |
-| `docs/code-comments` | Comentarios y docstrings en todo el código |
-| `docs/readme-expanded` | Esta versión ampliada del README |
+
+| Rama                           | Contenido                                                      |
+| ------------------------------ | -------------------------------------------------------------- |
+| `chore/project-scaffolding`    | Estructura, Docker Compose, configuración, esqueleto de la API |
+| `feat/data-generation`         | Generador con Faker y defectos                                 |
+| `feat/data-cleaning`           | Parsers y pipeline de limpieza                                 |
+| `feat/postgres-load-and-views` | Carga, tabla, vistas y tests de integración                    |
+| `feat/sql-validator`           | Validación sobre el AST                                        |
+| `feat/nl-query-endpoint`       | Servicio, prompt y endpoint `/ask`                             |
+| `docs/readme`                  | Primera versión de este README                                 |
+| `fix/require-table-reference`  | Regla "leer al menos una tabla"                                |
+| `chore/vllm-memory-defaults`   | `VLLM_GPU_MEM_UTIL=0.80` para GPUs de 4 GB                     |
+| `feat/natural-language-answer` | Respuesta redactada con comprobación de cifras                 |
+| `docs/code-comments`           | Comentarios y docstrings en todo el código                     |
+| `docs/readme-expanded`         | Esta versión ampliada del README                               |
+
 
 ## Solución de problemas
 
-| Síntoma | Causa | Solución |
-|---|---|---|
-| `/ask` devuelve `502 llm_unavailable` | vLLM no está arrancado o todavía no está *healthy* | `docker compose ps -a`; si está *Exited*, `docker compose logs vllm` |
-| vLLM termina con *"Free memory on device (…) is less than desired GPU memory utilization"* | `VLLM_GPU_MEM_UTIL` pide más VRAM de la libre | Bájalo o cierra aplicaciones que usen la GPU (navegador, IDE, juegos) |
-| vLLM termina con *"No available memory for the cache blocks"* | No queda VRAM para la caché KV | Súbelo un poco o baja `VLLM_MAX_MODEL_LEN` |
-| El contenedor de Postgres no arranca porque el puerto 5432 está en uso | Ya hay un PostgreSQL local en ese puerto | `POSTGRES_PORT=5433` en `.env` |
-| `curl` en Git Bash devuelve *"There was an error parsing the body"* | La consola de Windows no envía el cuerpo en UTF-8 (tildes, ¿) | Usa PowerShell (`Invoke-RestMethod`), `/docs`, o `curl --data-binary @pregunta.json` |
-| Un cambio en `docker/postgres/init/` no tiene efecto | Los scripts de inicio solo se ejecutan con el volumen vacío | `docker compose down -v` (borra los datos) y vuelve a arrancar + `orders-load` |
-| Después de los tests de integración hay menos datos | Esos tests recargan la tabla con su propio conjunto | `uv run orders-load` |
+
+| Síntoma                                                                                    | Causa                                                         | Solución                                                                             |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `/ask` devuelve `502 llm_unavailable`                                                      | vLLM no está arrancado o todavía no está *healthy*            | `docker compose ps -a`; si está *Exited*, `docker compose logs vllm`                 |
+| vLLM termina con *"Free memory on device (…) is less than desired GPU memory utilization"* | `VLLM_GPU_MEM_UTIL` pide más VRAM de la libre                 | Bájalo o cierra aplicaciones que usen la GPU (navegador, IDE, juegos)                |
+| vLLM termina con *"No available memory for the cache blocks"*                              | No queda VRAM para la caché KV                                | Súbelo un poco o baja `VLLM_MAX_MODEL_LEN`                                           |
+| El contenedor de Postgres no arranca porque el puerto 5432 está en uso                     | Ya hay un PostgreSQL local en ese puerto                      | `POSTGRES_PORT=5433` en `.env`                                                       |
+| `curl` en Git Bash devuelve *"There was an error parsing the body"*                        | La consola de Windows no envía el cuerpo en UTF-8 (tildes, ¿) | Usa PowerShell (`Invoke-RestMethod`), `/docs`, o `curl --data-binary @pregunta.json` |
+| Un cambio en `docker/postgres/init/` no tiene efecto                                       | Los scripts de inicio solo se ejecutan con el volumen vacío   | `docker compose down -v` (borra los datos) y vuelve a arrancar + `orders-load`       |
+| Después de los tests de integración hay menos datos                                        | Esos tests recargan la tabla con su propio conjunto           | `uv run orders-load`                                                                 |
+
 
 **Por qué 0.80 en una GPU de 4 GB**: `VLLM_GPU_MEM_UTIL` es la fracción de la VRAM *total* que reserva vLLM y no puede superar la memoria libre al arrancar. En Docker Desktop con WSL2 unos 0,8 GiB nunca están disponibles (WSL y el contexto CUDA): con una RTX 3050 de 4 GB solo quedan 3,21 GiB libres, así que 0.80 es el máximo. Con ese valor caben los pesos (2,89 GiB), las activaciones (0,13 GiB) y ~6.000 tokens de caché KV, suficiente para `max-model-len=2048`. El primer arranque descarga el modelo (~3 GB) y tarda varios minutos.
 
@@ -551,11 +593,8 @@ Cada funcionalidad o tarea se desarrolló en su propia rama y se integró en `ma
 
 ## Cómo usé la IA
 
-> ✏️ **Borrador: revisar y completar con tu experiencia.**
-
 - **Qué le pedí**: a Claude Code (asistente de programación) le pedí primero el andamiaje del proyecto a partir del enunciado, preguntándome antes de elegir cada herramienta (runtime del LLM, base de datos, librerías, gestor de dependencias). Después, la implementación completa con Faker para los datos, código comentado, diseño modular y una rama de git por funcionalidad. Más adelante, la respuesta en lenguaje natural (elegí la opción híbrida: LLM + comprobación de cifras + plantilla), comentar todo el código y ampliar este README.
-- **Qué acepté**: la estructura por capas (generación → limpieza → carga → validación → servicio → API), la validación sobre el AST con sqlglot más el rol de solo lectura como segunda barrera, y el mapeo de errores a códigos HTTP.
-- **Qué corregí / decidí yo**: elegí vLLM, PostgreSQL, pandas + sqlglot y uv; ajusté el modelo a mi GPU de 4 GB (Qwen2.5-Coder-1.5B en fp16 en lugar de uno de 7B); pedí Faker para generar los datos; elegí el enfoque híbrido para las respuestas redactadas. TODO: añadir lo que hayas revisado o cambiado tras leer el código.
+- **Qué corregí / decidí yo**: la estructura por capas (generación → limpieza → carga → validación → servicio → API), la validación sobre el AST con sqlglot más el rol de solo lectura como segunda barrera, y el mapeo de errores a códigos HTTP. Elegí vLLM, PostgreSQL, pandas + sqlglot y uv; ajusté el modelo a mi GPU de 4 GB (Qwen2.5-Coder-1.5B en fp16 en lugar de uno de 7B); pedí Faker para generar los datos; elegí el enfoque híbrido para las respuestas redactadas. TODO: añadir lo que hayas revisado o cambiado tras leer el código.
 - **Lo que se detectó y corrigió durante el desarrollo**:
   - Probando con el modelo real, respondía "¿Qué tiempo hace en Madrid?" con `SELECT CURRENT_TIMESTAMP` (se añadió la regla "al menos una tabla permitida") y redactaba rankings invertidos con cifras reales (se añadió la comprobación de atribución).
   - vLLM no arrancaba con `VLLM_GPU_MEM_UTIL=0.90`: en WSL2 solo hay 3,21 GiB libres de 4 (se midió y se fijó 0.80).
