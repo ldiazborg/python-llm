@@ -1,8 +1,9 @@
-"""Question -> SQL -> validation -> execution, independent of any web framework.
+"""Question -> SQL -> validation -> execution -> answer, independent of any web framework.
 
-`QueryService` composes three replaceable parts (an LLM SQL generator, a SQL
-validator and a query runner). The FastAPI layer only translates HTTP to this
-and errors back to HTTP, so the same service can back a CLI, a notebook or a
+`QueryService` composes replaceable parts: an LLM SQL generator, a SQL
+validator, a query runner and (optionally) an answer composer that phrases the
+result in natural language. The FastAPI layer only translates HTTP to this and
+errors back to HTTP, so the same service can back a CLI, a notebook or a
 different API.
 """
 
@@ -10,6 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from orders_nl.answers import AnswerComposer, NaturalAnswer
 from orders_nl.db import QueryRunner
 from orders_nl.errors import InvalidQueryError
 from orders_nl.llm import SQLGenerator
@@ -20,12 +22,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Answer:
-    """Result of answering a question, including the SQL that was actually run."""
+    """Result of answering a question, including the SQL that was actually run.
+
+    `natural` is the sentence answer; None when it wasn't requested or no
+    composer is configured.
+    """
 
     question: str
     sql: str
     columns: list[str]
     rows: list[dict[str, Any]]
+    natural: NaturalAnswer | None = None
 
     @property
     def row_count(self) -> int:
@@ -33,19 +40,27 @@ class Answer:
 
 
 class QueryService:
-    def __init__(self, generator: SQLGenerator, validator: SqlValidator, runner: QueryRunner) -> None:
+    def __init__(
+        self,
+        generator: SQLGenerator,
+        validator: SqlValidator,
+        runner: QueryRunner,
+        composer: AnswerComposer | None = None,
+    ) -> None:
         self._generator = generator
         self._validator = validator
         self._runner = runner
+        self._composer = composer
 
-    def ask(self, question: str) -> Answer:
+    def ask(self, question: str, *, natural_answer: bool = True) -> Answer:
         """Answer a natural-language question.
 
         Raises (see orders_nl.errors):
             LLMError / UnanswerableQuestionError  the LLM produced no usable SQL
             InvalidQueryError                     the validator or the database rejected it
             QueryExecutionError                   the database failed to run it
-        Nothing is executed unless the validator accepted the SQL.
+        Nothing is executed unless the validator accepted the SQL. Phrasing the
+        answer never raises: the composer falls back to a template.
         """
         raw_sql = self._generator.generate_sql(question)
 
@@ -62,4 +77,14 @@ class QueryService:
             exc.sql = exc.sql or safe_sql
             raise
 
-        return Answer(question=question, sql=safe_sql, columns=result.columns, rows=result.rows)
+        natural = None
+        if natural_answer and self._composer is not None:
+            natural = self._composer.compose(question, safe_sql, result)
+
+        return Answer(
+            question=question,
+            sql=safe_sql,
+            columns=result.columns,
+            rows=result.rows,
+            natural=natural,
+        )

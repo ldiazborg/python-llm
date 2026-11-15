@@ -96,3 +96,49 @@ def test_prompt_contains_schema_and_examples() -> None:
         assert name in system
     # system + one user/assistant pair per example + the question
     assert len(messages) == 1 + 2 * len(FEW_SHOT_EXAMPLES) + 1
+
+
+# --- answer writer ---------------------------------------------------------------------
+
+from orders_nl.db import QueryResult  # noqa: E402
+from orders_nl.llm import OpenAICompatibleAnswerWriter  # noqa: E402
+from orders_nl.llm.answer import build_answer_messages  # noqa: E402
+
+
+def _answer_writer(handler, max_rows: int = 20) -> OpenAICompatibleAnswerWriter:
+    client = openai.OpenAI(
+        base_url="http://llm.test/v1",
+        api_key="test",
+        max_retries=0,
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    return OpenAICompatibleAnswerWriter(client, "test-model", max_rows=max_rows)
+
+
+def test_answer_writer_sends_question_sql_and_rows() -> None:
+    sent: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.update(json.loads(request.content))
+        return _completion("  En marzo se vendieron 6.215,32 €.  ")
+
+    result = QueryResult(columns=["total_sales"], rows=[{"total_sales": 6215.32}])
+    text = _answer_writer(handler).write_answer("¿Cuánto en marzo?", "SELECT 1 FROM orders", result)
+
+    assert text == "En marzo se vendieron 6.215,32 €."
+    last = sent["messages"][-1]["content"]
+    assert "¿Cuánto en marzo?" in last
+    assert "SELECT 1 FROM orders" in last
+    assert '"total_sales": 6215.32' in last
+
+
+def test_answer_messages_cap_rows_and_say_so() -> None:
+    result = QueryResult(columns=["n"], rows=[{"n": i} for i in range(50)])
+    last = build_answer_messages("q", "SELECT n FROM orders", result, max_rows=3)[-1]["content"]
+    assert "Filas (3 de 50)" in last
+    assert '{"n": 3}' not in last
+
+
+def test_answer_writer_failure_is_llm_error() -> None:
+    with pytest.raises(LLMError):
+        _answer_writer(lambda r: httpx.Response(503)).write_answer("q", "SELECT 1", QueryResult([], []))

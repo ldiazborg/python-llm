@@ -5,7 +5,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from orders_nl.api.main import app, get_query_runner, get_sql_generator
+from orders_nl.api.main import app, get_answer_writer, get_query_runner, get_sql_generator
 from orders_nl.config import Settings, get_settings
 from orders_nl.db import QueryResult
 
@@ -41,9 +41,24 @@ class FakeQueryRunner:
         return self.result
 
 
+class FakeAnswerWriter:
+    """Simulated answer-writing LLM: canned sentence or canned error."""
+
+    def __init__(self, text: str = "Respuesta de prueba.", error: Exception | None = None) -> None:
+        self.text = text
+        self.error = error
+        self.calls: list[tuple[str, str, QueryResult]] = []  # (question, sql, result)
+
+    def write_answer(self, question: str, sql: str, result: QueryResult) -> str:
+        self.calls.append((question, sql, result))
+        if self.error is not None:
+            raise self.error
+        return self.text
+
+
 @pytest.fixture
 def fake_llm() -> FakeSQLGenerator:
-    return FakeSQLGenerator(sql="SELECT 1")
+    return FakeSQLGenerator(sql="SELECT * FROM orders")
 
 
 @pytest.fixture
@@ -52,12 +67,20 @@ def fake_db() -> FakeQueryRunner:
 
 
 @pytest.fixture
-def client(fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner) -> Iterator[TestClient]:
-    """API client with the LLM and the database replaced by fakes (no network)."""
+def fake_writer() -> FakeAnswerWriter:
+    return FakeAnswerWriter()
+
+
+@pytest.fixture
+def client(
+    fake_llm: FakeSQLGenerator, fake_db: FakeQueryRunner, fake_writer: FakeAnswerWriter
+) -> Iterator[TestClient]:
+    """API client with both LLM calls and the database replaced by fakes (no network)."""
     # _env_file=None: tests never depend on the developer's local .env.
     app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
     app.dependency_overrides[get_sql_generator] = lambda: fake_llm
     app.dependency_overrides[get_query_runner] = lambda: fake_db
+    app.dependency_overrides[get_answer_writer] = lambda: fake_writer
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

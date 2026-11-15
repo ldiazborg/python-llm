@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # Guardrails
     query_row_limit: int = 1000
 
+    # Natural-language answers: max result rows shown to the answer-writing LLM
+    # (keeps the prompt inside the model's context window).
+    answer_max_rows: int = 20
+
     @property
     def admin_sqlalchemy_url(self) -> str:
         """Owner/ETL connection (SQLAlchemy URL, psycopg 3 driver)."""
