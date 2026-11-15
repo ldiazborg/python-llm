@@ -615,6 +615,7 @@ Cada funcionalidad o tarea se desarrolló en su propia rama y se integró en `ma
 - Autenticación y rate limiting en la API; métricas y trazas (preguntas, SQL, latencias, rechazos).
 - Dockerfile para la API y CI (tests unitarios + integración con Postgres como servicio).
 - Ruff + mypy en pre-commit.
+- **Graphify para Claude Code**: generar con la skill `/graphify` un grafo de conocimiento persistente del repositorio (código, `docs/` y este README) en `graphify-out/`, con sus nodos centrales, comunidades y relaciones entre archivos. Así el asistente respondería a las preguntas de arquitectura ("¿qué depende de `domain.py`?", "¿qué hay que tocar para añadir un estado?") consultando el grafo en lugar de releer los archivos en cada sesión; complementaría el índice de `CLAUDE.md` y los documentos de `docs/`, que hoy se mantienen a mano.
 - **Pendiente tras la auditoría del código** (lo que era una funcionalidad nueva o un cambio de diseño no se implementó; los errores encontrados sí se corrigieron):
   - *Validador*: sustituir la lista negra de funciones por una **lista blanca** (agregados, fechas, texto, matemáticas), que no depende de conocer todas las funciones peligrosas de PostgreSQL.
   - *Base de datos*: fijar `statement_timeout` también en cada sesión (hoy solo lo garantiza la configuración del rol, que no existe si la base de datos se crea sin el script de inicio); un usuario propietario del esquema **sin superusuario** para el ETL (`POSTGRES_USER` lo es); límite de tamaño del resultado (bytes por celda y totales) además del de filas.
