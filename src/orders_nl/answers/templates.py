@@ -74,6 +74,10 @@ def template_answer(result: QueryResult, *, max_items: int = 5) -> str:
         return "No se encontraron resultados para esta pregunta."
     # Prefer the cursor's column order; fall back to the first row's keys.
     columns = result.columns or list(rows[0])
+    if not columns:
+        # `SELECT FROM orders` is valid PostgreSQL: rows without any column.
+        # There is nothing to describe, and the shapes below need a column.
+        return "No se encontraron resultados para esta pregunta."
 
     if len(rows) == 1 and len(columns) == 1:
         value = rows[0].get(columns[0])

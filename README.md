@@ -5,7 +5,7 @@ Proyecto en Python que:
 1. **Carga**: genera un CSV de pedidos con errores intencionados (Faker), lo limpia y lo guarda en **PostgreSQL**.
 2. **Modelos**: dos vistas SQL, ventas por mes y país, y los 10 clientes que más compran.
 3. **API (FastAPI)**: recibe una pregunta en lenguaje natural, un **LLM local (vLLM en Docker)** la convierte en SQL, la consulta se **valida** (solo lectura, solo tablas permitidas) y se devuelve el resultado, **redactado también en lenguaje natural** (con cada cifra comprobada contra los datos), o un error claro.
-4. **Tests** con pytest: 217 tests unitarios (sin Docker) y 9 de integración contra PostgreSQL real.
+4. **Tests** con pytest: 244 tests unitarios (sin Docker) y 13 de integración contra PostgreSQL real.
 
 ```text
 "¿Cuánto vendimos en España en marzo?"
@@ -282,6 +282,8 @@ SELECT * FROM analytics.v_top_customers LIMIT 3;
 | `sql`                          | La SQL **validada que se ejecutó** (con `LIMIT`)                           |
 | `columns`, `rows`, `row_count` | El resultado completo                                                      |
 
+Cada fila es un objeto `{columna: valor}`. Si la consulta devuelve dos columnas con el mismo nombre (`SELECT COUNT(*), COUNT(DISTINCT customer)` → `count`, `count`), la segunda se renombra (`count_2`) para no perder ningún valor. Los `numeric` sin decimales (conteos, años) llegan como enteros y los importes como decimales.
+
 
 ### Ejemplos
 
@@ -402,10 +404,10 @@ Los motivos de cada frase descartada quedan en el log del servidor (`Discarded L
 ## Tests
 
 ```bash
-uv run pytest                                   # 217 tests unitarios: sin Docker; LLM y BD simulados
+uv run pytest                                   # 244 tests unitarios: sin Docker; LLM y BD simulados
 
 docker compose up -d postgres                   # integración: PostgreSQL real
-RUN_INTEGRATION=1 uv run pytest -m integration  # 9 tests (vacían y recargan analytics.orders)
+RUN_INTEGRATION=1 uv run pytest -m integration  # 13 tests (vacían y recargan analytics.orders)
 uv run orders-load                              # después, recargar el conjunto completo
 ```
 
@@ -419,9 +421,10 @@ En PowerShell: `$env:RUN_INTEGRATION = "1"; uv run pytest -m integration`. Los t
 | `test_clean.py`                | 8     | Duplicados, fechas, importes, estados, pasos personalizados, generador → limpieza  |
 | `test_validator.py`            | 93    | 19 consultas válidas, 52 ataques, límites, ámbito de los CTE, reglas personalizadas |
 | `test_llm.py`                  | 15    | Clientes LLM con la capa HTTP simulada: errores, `CANNOT_ANSWER`, prompts          |
-| `test_answers.py`              | 44    | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas |
+| `test_answers.py`              | 46    | Comprobación de cifras y de atribución (con salidas reales del modelo), plantillas |
+| `test_db.py`                   | 25    | Conversión de valores a JSON, columnas repetidas, traducción de errores de la BD   |
 | `test_api.py`                  | 19    | Endpoint con LLM y BD simulados: éxito, cada código de error, respuesta redactada  |
-| `integration/test_postgres.py` | 9     | Carga real, idempotencia, vistas, permisos del rol, timeout                        |
+| `integration/test_postgres.py` | 13    | Carga real, idempotencia, vistas, permisos del rol, timeout, columnas repetidas    |
 
 
 Los tres tests que pide el enunciado: limpieza (`test_clean.py`), validación de la consulta (`test_validator.py`) y endpoint con el LLM simulado (`test_api.py`).

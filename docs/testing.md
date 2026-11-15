@@ -12,8 +12,9 @@ Commands are in [commands.md](commands.md#tests). Unit tests need no Docker, no 
 | `test_validator.py` | `VALID` / `INVALID` lists (52 attacks), LIMIT handling, CTE scoping, custom rules |
 | `test_llm.py` | both LLM clients over a mocked HTTP transport, prompt contents, `extract_sql` |
 | `test_answers.py` | number grounding/attribution (with real model outputs), templates, composer |
+| `test_db.py` | runner helpers that need no database: JSON-friendly values, unique column names, psycopg error → app error |
 | `test_api.py` | endpoint with all collaborators faked: success, every error code, natural answers |
-| `integration/test_postgres.py` | real load, idempotency, views, reader-role permissions, timeout (opt-in) |
+| `integration/test_postgres.py` | real load, idempotency, views, reader-role permissions with raw (unvalidated) SQL, timeout, repeated column names (opt-in) |
 
 The brief's three required tests are cleaning (`test_clean.py`), query validation (`test_validator.py`) and the endpoint with a simulated LLM (`test_api.py`).
 

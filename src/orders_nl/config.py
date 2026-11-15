@@ -29,6 +29,11 @@ ALLOWED_TABLES: frozenset[str] = frozenset(
     {"orders", "v_sales_by_month_country", "v_top_customers"}
 )
 
+# Seconds the API waits to open its database connection. Without it an
+# unreachable host keeps each request (and its worker thread) waiting for the
+# driver's default of about two minutes instead of failing fast with a 500.
+DB_CONNECT_TIMEOUT_S = 5
+
 
 class Settings(BaseSettings):
     """Typed view of the environment (`.env` + real environment variables).
@@ -94,6 +99,7 @@ class Settings(BaseSettings):
             dbname=self.postgres_db,
             user=self.reader_user,
             password=self.reader_password.get_secret_value(),
+            connect_timeout=DB_CONNECT_TIMEOUT_S,
         )
 
 

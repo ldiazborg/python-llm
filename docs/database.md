@@ -30,11 +30,15 @@ The reader role is the second barrier behind the SQL validator: even a validator
 
 | SQLSTATE | App error | HTTP |
 |---|---|---|
-| class `42` (undefined column/table, syntax, permission) or `22` (data exception) | `InvalidQueryError` with Postgres' primary message | 422 |
+| class `42` (undefined column/table, syntax, permission), `22` (data exception), `21` (scalar subquery returned several rows) or `0A` (feature not supported) | `InvalidQueryError` with Postgres' primary message | 422 |
 | `57014` (statement timeout) | `QueryTimeoutError` | 504 |
-| anything else (connection refused, read-only violation...) | `QueryExecutionError` with a generic message | 500 |
+| anything else (connection refused, read-only violation...) | `QueryExecutionError` with a generic message; the cause is logged at ERROR by `orders_nl.db` (the only trace of it) | 500 |
 
-The runner converts `Decimal` to `float` (otherwise pydantic serializes numerics as JSON strings) and reads column names from `cursor.description` (present even for 0 rows).
+Result shaping in the runner (`db.py`):
+
+- Column names come from `cursor.description` (present even for 0 rows) and are made unique by `_unique_names` (`count`, `count` → `count`, `count_2`). Rows are fetched as tuples and zipped with those names — never use `dict_row` here: PostgreSQL allows repeated column names and a dict would silently drop one.
+- `_to_json_friendly`: `numeric` with decimal places → `float` (amounts), without → `int` (`SUM` of a bigint and `EXTRACT(YEAR ...)` are `numeric` in PostgreSQL and must not come back as `862.0`); NaN/Infinity → text, because they have no JSON representation and would fail the whole response.
+- The reader connection string carries `connect_timeout` (`config.DB_CONNECT_TIMEOUT_S`, 5 s) so an unreachable database fails fast instead of holding a worker thread for minutes.
 
 ## Local port
 
